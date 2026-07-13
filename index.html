@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SVarticles — Research Feed</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <aside class="sidebar">
+    <p class="brand">SVarticles</p>
+    <p class="brand-sub">SemperVirens research feed</p>
+    <nav id="nav"></nav>
+    <div class="theme-chips">
+      <div class="theme-label">Cross-cutting themes</div>
+      <div class="theme-chip-row" id="themeChips"></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <input id="searchInput" class="search-input" type="text" placeholder="Search titles, companies, tags..." />
+      <button id="exportBtn" class="btn">Export my notes</button>
+    </div>
+    <div id="content"></div>
+  </main>
+
+  <div class="modal-backdrop" id="exportModal">
+    <div class="modal">
+      <h3>Export notes</h3>
+      <p>Copy this and send it to Claude to have it merged permanently into <code>data/articles.js</code>.</p>
+      <textarea id="exportTextarea" readonly></textarea>
+      <div class="modal-actions">
+        <button class="btn" id="closeModalBtn">Close</button>
+        <button class="btn primary" id="copyModalBtn">Copy</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="data/articles.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
