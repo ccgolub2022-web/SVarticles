@@ -8,8 +8,10 @@
 </head>
 <body>
   <aside class="sidebar">
-    <p class="brand">SVarticles</p>
-    <p class="brand-sub">SemperVirens research feed</p>
+    <div id="brand" class="brand-block">
+      <p class="brand">SVarticles</p>
+      <p class="brand-sub">SemperVirens research feed</p>
+    </div>
     <nav id="nav"></nav>
     <div class="theme-chips">
       <div class="theme-label">Cross-cutting themes</div>
@@ -20,19 +22,56 @@
   <main class="main">
     <div class="topbar">
       <input id="searchInput" class="search-input" type="text" placeholder="Search titles, companies, tags..." />
-      <button id="exportBtn" class="btn">Export my notes</button>
+      <button id="addArticleBtn" class="btn add-article-btn"><span class="plus">+</span> Add Article</button>
+      <button id="syncBtn" class="btn">Sync with Claude</button>
     </div>
     <div id="content"></div>
   </main>
 
-  <div class="modal-backdrop" id="exportModal">
+  <div class="modal-backdrop" id="addModal">
     <div class="modal">
-      <h3>Export notes</h3>
-      <p>Copy this and send it to Claude to have it merged permanently into <code>data/articles.js</code>.</p>
-      <textarea id="exportTextarea" readonly></textarea>
+      <h3>Add article</h3>
+      <p>Just the link and a bit of context — Claude classifies it and fills in the rest when you sync.</p>
+
+      <div class="form-field">
+        <label class="form-label" for="addUrlInput">Link *</label>
+        <input id="addUrlInput" class="form-input" type="text" placeholder="https://..." />
+      </div>
+      <div class="form-row">
+        <div class="form-field">
+          <label class="form-label" for="addSenderInput">Who sent it</label>
+          <input id="addSenderInput" class="form-input" type="text" placeholder="e.g. Dana K." />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="addChannelInput">Slack channel</label>
+          <input id="addChannelInput" class="form-input" type="text" placeholder="e.g. #fintech-deals" />
+        </div>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="addNoteInput">Quick note (why it's worth reading)</label>
+        <textarea id="addNoteInput" class="form-input form-textarea" placeholder="Optional context from the Slack message..."></textarea>
+      </div>
+      <div class="form-field">
+        <span class="form-label">Date added</span>
+        <div class="form-static" id="addDateDisplay"></div>
+      </div>
+
       <div class="modal-actions">
-        <button class="btn" id="closeModalBtn">Close</button>
-        <button class="btn primary" id="copyModalBtn">Copy</button>
+        <button class="btn" id="closeAddModalBtn">Cancel</button>
+        <button class="btn primary" id="submitAddModalBtn">Add to Inbox</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="syncModal">
+    <div class="modal">
+      <h3>Sync with Claude</h3>
+      <p>Copy this and paste it to Claude in this repo. It will fetch and classify any new links and merge your notes into <code>data/articles.js</code>.</p>
+      <textarea id="syncTextarea" class="modal-code-textarea" readonly></textarea>
+      <div class="modal-actions">
+        <button class="btn" id="clearPendingBtn" style="display:none;">Clear synced queue</button>
+        <button class="btn" id="closeSyncModalBtn">Close</button>
+        <button class="btn primary" id="copySyncBtn">Copy</button>
       </div>
     </div>
   </div>

@@ -11,8 +11,49 @@ directly in a browser (or hosted on GitHub Pages).
 
 ## Your job in this repo
 
-When the user pastes a Slack message (text, link, and/or screenshot) about an
-article, act as their classification/research assistant:
+There are two ways an article reaches you. Handle both the same way from
+step 2 onward — classify, write the record, append, commit.
+
+**A. Pasted Slack message.** The user pastes a Slack message (text, link,
+and/or screenshot) directly in chat.
+
+**B. "Sync with Claude" payload.** The user clicks **+ Add Article** on the
+page to queue a link (just the URL + optional sender/channel/quick note —
+the app auto-fills today's date), then clicks **Sync with Claude** and
+pastes you a payload shaped like:
+
+```js
+// New links — fetch each URL, classify per CLAUDE.md, and add full records to data/articles.js
+const NEW_LINKS = [
+  { url: "...", sender: "...", channel: "...", quickNote: "...", dateAdded: "2026-07-13" },
+];
+// Note updates — merge into existing articles' myNotes by id
+const NOTES_UPDATES = [
+  { id: "...", myNotes: "..." },
+];
+```
+
+For each `NEW_LINKS` entry:
+1. **Fetch the article** with WebFetch to get its actual title, publisher,
+   and content — don't guess from the URL alone. If the fetch fails
+   (paywall, login wall, blocked), still create the record using whatever
+   you can infer from the URL/quickNote, and note the fetch failure in
+   `needsReviewReason` so the user knows the summary is thin.
+2. Treat `sender` → `sender`, `channel` → `slackChannel`, `quickNote` →
+   `whyShared` (combine with anything useful from the fetched content),
+   `dateAdded` → both `sharedAt` and `dateAdded` unless the article text
+   reveals a more precise shared time.
+3. Classify and write the full record as in the manual flow below, then
+   append it to `ARTICLES` in `data/articles.js`.
+
+For each `NOTES_UPDATES` entry, find the existing article by `id` in
+`data/articles.js` and overwrite its `myNotes` field.
+
+After processing a sync payload, commit, and tell the user it's safe to
+click **Clear synced queue** in the app (this only clears their local
+pending-links cache, it doesn't touch the repo).
+
+**Classification steps** (both flows):
 
 1. **Extract metadata**: title, URL, source/publisher, Slack channel, sender,
    timestamp, and the message text explaining why it was shared. Ask the user
