@@ -3,14 +3,9 @@
 // Ask Claude to append new records here after pasting a Slack message/link.
 
 const TAXONOMY = {
-  primaryBuckets: ["Inbox", "Markets", "Companies", "Company Sectors", "Portfolio Companies"],
-  subTopics: {
-    "Markets": ["Macro", "Rates / Fed", "Public markets", "Sector trends", "Competition / market structure"],
-    "Companies": ["Company strategy", "Product launches", "Financial performance", "Fundraising / M&A", "Leadership / org changes"],
-    "Company Sectors": ["Workforce", "Healthcare", "Fintech"],
-    "Portfolio Companies": ["Workforce", "Healthcare", "Fintech"],
-    "Inbox": []
-  },
+  primaryBuckets: ["General Market", "Enterprise Updates", "Portfolio Companies", "Potential Companies"],
+  // Sector applies to every bucket except General Market (which uses tags instead).
+  sectorBuckets: ["Enterprise Updates", "Portfolio Companies", "Potential Companies"],
   sectors: ["Workforce", "Healthcare", "Fintech"],
   crossCuttingThemes: ["AI", "regulation", "distribution", "competition", "pricing", "workflow"]
 };
@@ -27,12 +22,13 @@ const ARTICLES = [
     sender: "Dana K.",
     sharedAt: "2026-07-10 09:14",
     whyShared: "Dana flagged this ahead of our LP call — relevant to how we talk about the rate environment for growth-stage financings.",
-    primaryBucket: "Markets",
-    subTopic: "Rates / Fed",
+    primaryBucket: "General Market",
     sector: null,
     companyName: "",
     tags: ["macro", "rates", "us", "fed"],
+    imageUrl: "",
     summary: "The Fed signaled a slower cadence of rate cuts for the remainder of 2026, citing sticky services inflation. Markets had priced in a faster path, so this is a modest hawkish surprise.",
+    fullText: "",
     keyTakeaways: [
       "Terminal rate expectations moved up ~25bps after the statement",
       "Growth-stage financing costs likely stay elevated longer than the market assumed in Q2"
@@ -42,7 +38,6 @@ const ARTICLES = [
     ],
     myNotes: "",
     relatedArticleIds: [],
-    needsReviewReason: "",
     dateAdded: "2026-07-10"
   },
   {
@@ -54,12 +49,13 @@ const ARTICLES = [
     sender: "Priya S.",
     sharedAt: "2026-07-11 14:02",
     whyShared: "Priya shared this as a comp for the underwriting-automation startup we're diligencing this week.",
-    primaryBucket: "Companies",
-    subTopic: "Product launches",
+    primaryBucket: "Potential Companies",
     sector: "Fintech",
     companyName: "Ramp",
-    tags: ["ramp", "fintech", "ai", "product-launch", "underwriting", "series-unknown"],
+    tags: ["ramp", "fintech", "ai", "product-launch", "underwriting"],
+    imageUrl: "",
     summary: "Ramp introduced an AI underwriting layer that uses real-time transaction data instead of static financials to set SMB credit limits, aiming to approve thinner-file businesses faster.",
+    fullText: "",
     keyTakeaways: [
       "Direct competitive signal for any underwriting-automation company we're evaluating",
       "Validates real-time transaction data as an underwriting moat, not just a feature"
@@ -70,7 +66,6 @@ const ARTICLES = [
     ],
     myNotes: "",
     relatedArticleIds: [],
-    needsReviewReason: "",
     dateAdded: "2026-07-11"
   },
   {
@@ -83,11 +78,12 @@ const ARTICLES = [
     sharedAt: "2026-07-12 08:30",
     whyShared: "Portfolio company update shared directly by the CEO ahead of their board meeting.",
     primaryBucket: "Portfolio Companies",
-    subTopic: "Healthcare",
     sector: "Healthcare",
     companyName: "Vitable Health",
     tags: ["vitable-health", "healthcare", "employer-benefits", "expansion"],
+    imageUrl: "",
     summary: "Vitable is expanding its virtual primary care offering into employer-sponsored benefits, targeting mid-market employers as a new distribution channel alongside its direct-to-consumer base.",
+    fullText: "",
     keyTakeaways: [
       "New distribution channel (employer benefits) could meaningfully change CAC",
       "Board meeting this month — worth prepping questions on channel economics"
@@ -98,7 +94,6 @@ const ARTICLES = [
     ],
     myNotes: "",
     relatedArticleIds: [],
-    needsReviewReason: "",
     dateAdded: "2026-07-12"
   },
   {
@@ -110,12 +105,13 @@ const ARTICLES = [
     sender: "Alex R.",
     sharedAt: "2026-07-13 11:47",
     whyShared: "Alex flagged this as relevant background for any workforce-sector company with EU exposure.",
-    primaryBucket: "Company Sectors",
-    subTopic: "Workforce",
+    primaryBucket: "Enterprise Updates",
     sector: "Workforce",
     companyName: "",
-    tags: ["workforce", "regulation", "gig-economy", "eu"],
+    tags: ["regulation", "gig-economy", "eu"],
+    imageUrl: "",
     summary: "The EU finalized rules presuming platform workers are employees unless platforms can prove otherwise, raising compliance costs for gig-economy marketplaces operating in the region.",
+    fullText: "",
     keyTakeaways: [
       "Any workforce marketplace with EU gig-worker supply faces cost/compliance pressure",
       "Could accelerate demand for compliance/classification tooling as a category"
@@ -125,29 +121,6 @@ const ARTICLES = [
     ],
     myNotes: "",
     relatedArticleIds: [],
-    needsReviewReason: "",
-    dateAdded: "2026-07-13"
-  },
-  {
-    id: "2026-07-13-unclear-payments-post",
-    title: "\"The next chapter of payments\" (LinkedIn post, no byline)",
-    url: "https://example.com/next-chapter-payments",
-    source: "LinkedIn",
-    slackChannel: "#random-shares",
-    sender: "Jordan L.",
-    sharedAt: "2026-07-13 16:05",
-    whyShared: "Jordan shared with just \"thought this was interesting\" — no further context.",
-    primaryBucket: "Inbox",
-    subTopic: "",
-    sector: null,
-    companyName: "",
-    tags: ["payments"],
-    summary: "",
-    keyTakeaways: [],
-    openQuestions: [],
-    myNotes: "",
-    relatedArticleIds: [],
-    needsReviewReason: "Opinion post with no clear news hook or company reference — likely Markets > Sector trends or Company Sectors > Fintech, but needs a read-through to tell which.",
     dateAdded: "2026-07-13"
   }
 ];

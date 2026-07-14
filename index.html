@@ -8,9 +8,12 @@
 </head>
 <body>
   <aside class="sidebar">
-    <div id="brand" class="brand-block">
-      <p class="brand">SVarticles</p>
-      <p class="brand-sub">SemperVirens research feed</p>
+    <div class="sidebar-top">
+      <div id="brand" class="brand-block">
+        <p class="brand">SVarticles</p>
+        <p class="brand-sub">SemperVirens research feed</p>
+      </div>
+      <button id="sidebarToggleBtn" class="sidebar-toggle-btn" title="Collapse sidebar">«</button>
     </div>
     <nav id="nav"></nav>
     <div class="theme-chips">
@@ -31,11 +34,32 @@
   <div class="modal-backdrop" id="addModal">
     <div class="modal">
       <h3>Add article</h3>
-      <p>Just the link and a bit of context — Claude classifies it and fills in the rest when you sync.</p>
+      <p>Drop in a link and pick where it belongs — Claude fills in the summary, tags, and photo when you sync.</p>
 
       <div class="form-field">
         <label class="form-label" for="addUrlInput">Link *</label>
-        <input id="addUrlInput" class="form-input" type="text" placeholder="https://..." />
+        <input id="addUrlInput" class="form-input" type="text" placeholder="https://... (article, LinkedIn post, etc.)" />
+      </div>
+      <div class="form-row">
+        <div class="form-field">
+          <label class="form-label" for="addBucketInput">Section *</label>
+          <select id="addBucketInput" class="form-input">
+            <option value="" disabled selected>Choose a section...</option>
+            <option value="General Market">General Market</option>
+            <option value="Enterprise Updates">Enterprise Updates</option>
+            <option value="Portfolio Companies">Portfolio Companies</option>
+            <option value="Potential Companies">Potential Companies</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="addSectorInput">Sector</label>
+          <select id="addSectorInput" class="form-input">
+            <option value="">Unspecified</option>
+            <option value="Workforce">Workforce</option>
+            <option value="Healthcare">Healthcare</option>
+            <option value="Fintech">Fintech</option>
+          </select>
+        </div>
       </div>
       <div class="form-row">
         <div class="form-field">
@@ -55,10 +79,11 @@
         <span class="form-label">Date added</span>
         <div class="form-static" id="addDateDisplay"></div>
       </div>
+      <div class="form-error" id="addFormError" style="display:none;"></div>
 
       <div class="modal-actions">
         <button class="btn" id="closeAddModalBtn">Cancel</button>
-        <button class="btn primary" id="submitAddModalBtn">Add to Inbox</button>
+        <button class="btn primary" id="submitAddModalBtn">Add article</button>
       </div>
     </div>
   </div>
