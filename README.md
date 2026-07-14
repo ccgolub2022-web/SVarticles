@@ -22,6 +22,17 @@ tab). No server or build step needed.
 - Search by title, company, tag, sender, or channel.
 - Click a card to expand it and read the summary, key takeaways, open
   questions, and add your own notes.
+- **Listen instead of reading.** Every expanded card has a 🔊 button that
+  reads the title, summary, key takeaways, and open questions aloud using
+  your browser's built-in text-to-speech — no app or account needed. Each
+  section header also has a "Listen to section" button that queues every
+  article in that view and plays through them back-to-back — handy for
+  catching up while driving. A small player bar at the bottom shows what's
+  playing with pause/skip/stop controls, and keeps playing as you browse to
+  other pages.
+- **This Week's Roundup** on the home page (and the "Weekly Roundup" tab)
+  shows a synthesis of what came in recently and the themes that showed up
+  more than once — see below for how it gets generated.
 
 ## Adding new articles
 
@@ -45,6 +56,15 @@ was shared + who/where) straight to Claude in chat — same result.
 Notes you type in any article's "My notes" box are saved locally in your
 browser as you go; they're included automatically the next time you sync.
 
+## Weekly Roundup
+
+Ask Claude "generate this week's roundup" (in this repo, any time) and it
+reads everything added that week, writes a short synthesis plus any themes
+that came up more than once, and appends it to `data/roundups.js`. It shows
+up on the home page and in the "Weekly Roundup" tab. Nothing runs on a
+schedule automatically — it's a one-line ask whenever you want to catch up
+your own thinking or want something to hand to the team.
+
 ## Hosting it (recommended — one-time setup)
 
 `main` always has the latest version of the site, so you can host it for a
@@ -64,4 +84,5 @@ within a minute of the push landing on `main`.
 
 - `index.html`, `styles.css`, `app.js` — the page itself
 - `data/articles.js` — the article database + taxonomy definitions
+- `data/roundups.js` — weekly synthesis records
 - `CLAUDE.md` — classification rules Claude follows when adding articles

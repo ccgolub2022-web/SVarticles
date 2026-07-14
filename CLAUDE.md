@@ -143,3 +143,32 @@ multiple people/channels (a signal of importance).
 If several articles share a theme (e.g. three articles this week about AI
 pricing in fintech), set each one's `relatedArticleIds` to point at the others
 so the page clusters them together, even across different primary buckets.
+
+## Weekly Roundup
+
+When the user asks for "this week's roundup" (or similar — "summarize this
+week", "what came in this week"), read every article in `data/articles.js`
+with `dateAdded` in the requested week (default: the last 7 days, Monday
+through Sunday) and write one record to the `ROUNDUPS` array in
+`data/roundups.js`:
+
+```js
+{
+  id: "2026-07-07-2026-07-13",        // weekStart-weekEnd
+  weekLabel: "Jul 7 – Jul 13, 2026",   // human-readable
+  weekStart: "2026-07-07",             // ISO date, Monday
+  weekEnd: "2026-07-13",               // ISO date, Sunday
+  summary: "",                         // 3-5 sentence synthesis of the week's throughline(s)
+  keyThemes: [
+    { theme: "", articleIds: [] },     // only include themes 2+ articles actually share — don't force one
+  ],
+  generatedAt: "2026-07-13"
+}
+```
+
+`summary` should read like a briefing, not a list — what mattered this week
+and why, referencing the articles implicitly. Only surface a `keyThemes`
+entry when multiple articles genuinely converge on it; a quiet week with no
+real pattern is a valid (and honest) summary. Append the new record and
+commit — don't overwrite prior weeks. If a roundup already exists for the
+requested week, update that record instead of creating a duplicate.

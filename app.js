@@ -26,7 +26,138 @@ const state = {
   tag: null,               // string | null (cross-cutting theme or any tag)
   query: "",
   expanded: new Set(),
+  speech: { queue: [], index: -1, playing: false, paused: false },
 };
+
+// ---------------- Read aloud (Web Speech API) ----------------
+// Fully client-side text-to-speech so articles can be listened to hands-free
+// (e.g. while driving). No network/API calls involved.
+
+const speechSupported = typeof window !== "undefined" && "speechSynthesis" in window;
+let speechToken = 0;
+
+function speechTextFor(a) {
+  const parts = [a.title];
+  if (a.source) parts.push(`From ${a.source}.`);
+  parts.push(a.summary || "No summary written yet for this one.");
+  if (a.keyTakeaways && a.keyTakeaways.length) {
+    parts.push("Key takeaways: " + a.keyTakeaways.join(". ") + ".");
+  }
+  if (a.openQuestions && a.openQuestions.length) {
+    parts.push("Open questions: " + a.openQuestions.join(". ") + ".");
+  }
+  return parts.join(" ");
+}
+
+function playArticle(a) {
+  if (!speechSupported) return;
+  state.speech = { queue: [a], index: 0, playing: false, paused: false };
+  speakCurrent();
+}
+
+function playSection(articles) {
+  if (!speechSupported) return;
+  const queue = articles.filter(a => a.summary && a.summary.trim().length);
+  if (!queue.length) return;
+  state.speech = { queue, index: 0, playing: false, paused: false };
+  speakCurrent();
+}
+
+function speakCurrent() {
+  const s = state.speech;
+  if (s.index < 0 || s.index >= s.queue.length) { stopPlayback(); return; }
+  const token = ++speechToken;
+  const article = s.queue[s.index];
+  // Reflect the requested state immediately rather than waiting on the
+  // browser's onstart event, which can be slow or (on some platforms/voices)
+  // never fire at all — the UI shouldn't look inert while audio is loading.
+  s.playing = true;
+  s.paused = false;
+  renderMiniPlayer();
+  renderMain();
+  let startedOk = false;
+  const utter = new SpeechSynthesisUtterance(speechTextFor(article));
+  utter.rate = 1;
+  utter.onstart = () => {
+    if (token !== speechToken) return;
+    startedOk = true;
+    s.playing = true;
+    s.paused = false;
+    renderMiniPlayer();
+    renderMain();
+  };
+  utter.onend = () => {
+    if (token !== speechToken) return;
+    s.index++;
+    if (s.index < s.queue.length) speakCurrent(); else stopPlayback();
+  };
+  utter.onerror = (e) => {
+    if (token !== speechToken) return;
+    // "interrupted"/"canceled" happen when we ourselves call cancel() below
+    // for the next track — that's not a failure, the token guard already
+    // filters stray callbacks from that. A hard failure is one where the
+    // browser never actually started speaking at all (e.g. no TTS voices
+    // installed) — surface that instead of silently closing the player.
+    if (!startedOk && e.error !== "interrupted" && e.error !== "canceled") {
+      s.error = "Couldn't play audio — this browser/device may not have text-to-speech voices installed.";
+      s.playing = false;
+      renderMiniPlayer();
+      renderMain();
+      return;
+    }
+    s.index++;
+    if (s.index < s.queue.length) speakCurrent(); else stopPlayback();
+  };
+  speechSynthesis.cancel();
+  speechSynthesis.speak(utter);
+}
+
+function togglePausePlayback() {
+  if (!speechSupported) return;
+  const s = state.speech;
+  if (s.paused) { speechSynthesis.resume(); s.paused = false; }
+  else { speechSynthesis.pause(); s.paused = true; }
+  renderMiniPlayer();
+}
+
+function skipPlayback() {
+  const s = state.speech;
+  if (s.index < s.queue.length - 1) { s.index++; speakCurrent(); }
+  else stopPlayback();
+}
+
+function stopPlayback() {
+  speechToken++;
+  if (speechSupported) speechSynthesis.cancel();
+  state.speech = { queue: [], index: -1, playing: false, paused: false };
+  renderMiniPlayer();
+  renderMain();
+}
+
+function isPlayingArticle(a) {
+  const s = state.speech;
+  return s.index >= 0 && s.queue[s.index] && s.queue[s.index].id === a.id;
+}
+
+function renderMiniPlayer() {
+  const bar = document.getElementById("miniPlayer");
+  if (!bar) return;
+  const s = state.speech;
+  if (s.index < 0 || !s.queue[s.index]) {
+    bar.classList.remove("open");
+    return;
+  }
+  const current = s.queue[s.index];
+  bar.classList.add("open");
+  bar.classList.toggle("error", !!s.error);
+  document.getElementById("miniPlayerTitle").textContent = current.title;
+  document.getElementById("miniPlayerProgress").textContent = s.error
+    ? s.error
+    : (s.queue.length > 1 ? `Article ${s.index + 1} of ${s.queue.length}` : "Listening");
+  document.getElementById("miniPlayerPauseBtn").style.display = s.error ? "none" : "";
+  document.getElementById("miniPlayerSkipBtn").style.display = s.error ? "none" : "";
+  document.getElementById("miniPlayerPauseBtn").textContent = s.paused ? "▶" : "⏸";
+}
 
 // ---------------- Storage ----------------
 
@@ -155,6 +286,10 @@ function renderSidebar() {
     setState({ view: "section", bucket: "Inbox", sector: null, subTopic: null, tag: null });
   }));
 
+  nav.appendChild(navItem("Weekly Roundup", ROUNDUPS.length, state.view === "roundups", () => {
+    setState({ view: "roundups" });
+  }));
+
   nav.appendChild(divider());
 
   // Markets: subgroups by subTopic
@@ -258,6 +393,8 @@ function renderMain() {
   main.innerHTML = "";
   if (state.view === "home") {
     renderHome(main);
+  } else if (state.view === "roundups") {
+    renderRoundupsView(main);
   } else {
     renderSection(main);
   }
@@ -278,6 +415,11 @@ function renderHome(main) {
   const addBtn = bigAddButton();
   hero.appendChild(addBtn);
   main.appendChild(hero);
+
+  if (ROUNDUPS.length) {
+    const latest = ROUNDUPS[ROUNDUPS.length - 1];
+    main.appendChild(renderRoundupCard(latest, { compact: true }));
+  }
 
   if (inboxCount > 0) {
     const strip = document.createElement("div");
@@ -326,21 +468,129 @@ function renderTile(meta) {
   return tile;
 }
 
+// ---------------- Weekly Roundup ----------------
+
+function roundupToSpeechArticle(r) {
+  return {
+    id: "roundup-" + r.id,
+    title: `Weekly roundup: ${r.weekLabel}`,
+    summary: r.summary,
+    keyTakeaways: r.keyThemes.map(t => t.theme),
+    openQuestions: [],
+  };
+}
+
+function renderRoundupCard(r, { compact }) {
+  const card = document.createElement("div");
+  card.className = "roundup-card";
+
+  const head = document.createElement("div");
+  head.style.display = "flex";
+  head.style.justifyContent = "space-between";
+  head.style.alignItems = "flex-start";
+  head.style.gap = "12px";
+  head.innerHTML = `
+    <div>
+      <div class="roundup-eyebrow">${compact ? "This week's roundup" : "Weekly roundup"}</div>
+      <div class="roundup-week">${escapeHtml(r.weekLabel)}</div>
+    </div>
+  `;
+  if (speechSupported) {
+    const listenBtn = document.createElement("button");
+    const speechArticle = roundupToSpeechArticle(r);
+    const playing = isPlayingArticle(speechArticle) && state.speech.playing && !state.speech.paused;
+    listenBtn.className = "listen-btn" + (playing ? " listening" : "");
+    listenBtn.title = playing ? "Pause" : "Listen to this roundup";
+    listenBtn.textContent = playing ? "⏸" : "🔊";
+    listenBtn.onclick = (e) => {
+      e.stopPropagation();
+      if (isPlayingArticle(speechArticle)) togglePausePlayback();
+      else playArticle(speechArticle);
+    };
+    head.appendChild(listenBtn);
+  }
+  card.appendChild(head);
+
+  const summary = document.createElement("div");
+  summary.className = "roundup-summary";
+  summary.textContent = r.summary;
+  card.appendChild(summary);
+
+  const themes = document.createElement("div");
+  themes.className = "roundup-themes";
+  r.keyThemes.forEach(t => {
+    const chip = document.createElement("span");
+    chip.className = "roundup-theme-chip";
+    chip.textContent = `${t.theme} (${t.articleIds.length})`;
+    chip.onclick = () => {
+      const first = ARTICLES.find(a => a.id === t.articleIds[0]);
+      if (!first) return;
+      state.expanded.add(first.id);
+      setState({ view: "section", bucket: "All", sector: null, subTopic: null, tag: null, query: "" });
+      document.getElementById("searchInput").value = "";
+    };
+    themes.appendChild(chip);
+  });
+  card.appendChild(themes);
+
+  if (compact && ROUNDUPS.length > 1) {
+    const link = document.createElement("div");
+    link.className = "back-link";
+    link.style.marginTop = "12px";
+    link.textContent = `View all ${ROUNDUPS.length} roundups →`;
+    link.onclick = () => setState({ view: "roundups" });
+    card.appendChild(link);
+  }
+
+  return card;
+}
+
+function renderRoundupsView(main) {
+  const titleWrap = document.createElement("div");
+  titleWrap.className = "section-header";
+  titleWrap.innerHTML = `
+    <div>
+      <span class="back-link" id="backHome">← Home</span>
+      <h1 class="section-title">Weekly Roundup</h1>
+      <p class="section-desc">${ROUNDUPS.length} week${ROUNDUPS.length === 1 ? "" : "s"} summarized</p>
+    </div>
+  `;
+  main.appendChild(titleWrap);
+  document.getElementById("backHome").onclick = goHome;
+
+  if (!ROUNDUPS.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "No roundups yet. Ask Claude to “generate this week's roundup” once you've got a few articles in.";
+    main.appendChild(empty);
+    return;
+  }
+
+  [...ROUNDUPS].reverse().forEach(r => main.appendChild(renderRoundupCard(r, { compact: false })));
+}
+
 function renderSection(main) {
   const filtered = mergedArticles().filter(matchesFilters);
 
   const titleWrap = document.createElement("div");
+  titleWrap.className = "section-header";
   const back = `<span class="back-link" id="backHome">← Home</span>`;
   let heading = state.tag ? `Theme: ${state.tag}` : (state.bucket === "All" ? "All Articles" : state.bucket);
   if (state.sector) heading += ` — ${state.sector}`;
   if (state.subTopic) heading += ` — ${state.subTopic}`;
+  const listenableCount = filtered.filter(a => a.summary && a.summary.trim().length).length;
   titleWrap.innerHTML = `
-    ${back}
-    <h1 class="section-title">${heading}</h1>
-    <p class="section-desc">${filtered.length} article${filtered.length === 1 ? "" : "s"}</p>
+    <div>
+      ${back}
+      <h1 class="section-title">${heading}</h1>
+      <p class="section-desc">${filtered.length} article${filtered.length === 1 ? "" : "s"}</p>
+    </div>
+    ${speechSupported && listenableCount ? `<button class="btn" id="listenSectionBtn">🔊 Listen to section (${listenableCount})</button>` : ""}
   `;
   main.appendChild(titleWrap);
   document.getElementById("backHome").onclick = goHome;
+  const listenSectionBtn = document.getElementById("listenSectionBtn");
+  if (listenSectionBtn) listenSectionBtn.onclick = () => playSection(filtered);
 
   if (filtered.length === 0) {
     const empty = document.createElement("div");
@@ -419,8 +669,25 @@ function renderCard(a) {
   chevron.className = "card-chevron";
   chevron.textContent = state.expanded.has(a.id) ? "▲" : "▼";
 
+  const headRight = document.createElement("div");
+  headRight.className = "card-head-right";
+  if (speechSupported && a.summary && a.summary.trim().length) {
+    const listenBtn = document.createElement("button");
+    const playing = isPlayingArticle(a) && state.speech.playing && !state.speech.paused;
+    listenBtn.className = "listen-btn" + (playing ? " listening" : "");
+    listenBtn.title = playing ? "Pause" : "Listen to this article";
+    listenBtn.textContent = playing ? "⏸" : "🔊";
+    listenBtn.onclick = (e) => {
+      e.stopPropagation();
+      if (isPlayingArticle(a)) togglePausePlayback();
+      else playArticle(a);
+    };
+    headRight.appendChild(listenBtn);
+  }
+  headRight.appendChild(chevron);
+
   head.appendChild(left);
-  head.appendChild(chevron);
+  head.appendChild(headRight);
   card.appendChild(head);
 
   if (a.tags && a.tags.length) {
@@ -634,4 +901,8 @@ document.addEventListener("DOMContentLoaded", () => {
     btn.textContent = "Copied";
     setTimeout(() => btn.textContent = orig, 1200);
   });
+
+  document.getElementById("miniPlayerPauseBtn").addEventListener("click", togglePausePlayback);
+  document.getElementById("miniPlayerSkipBtn").addEventListener("click", skipPlayback);
+  document.getElementById("miniPlayerStopBtn").addEventListener("click", stopPlayback);
 });
