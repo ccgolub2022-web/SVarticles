@@ -45,11 +45,20 @@ was shared + who/where) straight to Claude in chat — same result.
 Notes you type in any article's "My notes" box are saved locally in your
 browser as you go; they're included automatically the next time you sync.
 
-## Hosting it (optional)
+## Hosting it (recommended — one-time setup)
 
-To access this from anywhere instead of opening the file locally, enable
-GitHub Pages for this repo (Settings → Pages → deploy from the `main`
-branch, root folder) — no other changes needed.
+`main` always has the latest version of the site, so you can host it for a
+permanent URL instead of opening the file locally each time:
+
+1. Go to the repo on GitHub → **Settings** → **Pages**.
+2. Under "Build and deployment", set **Source** to "Deploy from a branch".
+3. Set **Branch** to `main`, folder `/ (root)`, then **Save**.
+4. GitHub will publish it at `https://ccgolub2022-web.github.io/SVarticles/`
+   within a minute or two.
+
+No build step is needed — it's already plain HTML/CSS/JS. Every time Claude
+commits new articles or you push a change, the live site updates automatically
+within a minute of the push landing on `main`.
 
 ## Files
 
