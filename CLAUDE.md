@@ -16,6 +16,13 @@ same classification rules documented here, just running unattended. Most of
 your job is unchanged either way: when the Worker isn't configured (or a
 request to it fails), everything falls back to the manual flow below.
 
+The Worker can also run on a schedule to **auto-ingest** articles from RSS
+feeds and NewsAPI (see the README's "Automatic feed ingestion" section). This
+is the one path where the section isn't user-chosen — the Worker asks Claude to
+pick the `primaryBucket`/`sector` and to drop off-thesis items, and tags each
+record `auto-ingested`. Records with that tag came in this way; everything else
+was assigned by the user.
+
 ## Your job in this repo
 
 The user always assigns the section (and sector, where relevant) themselves

@@ -2,8 +2,14 @@ name = "svarticles-worker"
 main = "index.js"
 compatibility_date = "2025-01-01"
 
-# Non-secret config. Secrets (ANTHROPIC_API_KEY, GITHUB_TOKEN, WORKER_SECRET)
-# are set separately with `wrangler secret put <NAME>` — see ../README.md.
+# Scheduled feed ingestion: every 6 hours, pull fresh items from the RSS feeds
+# and NewsAPI, classify them, and commit the new records. Adjust or remove.
+[triggers]
+crons = ["0 */6 * * *"]
+
+# Non-secret config. Secrets (ANTHROPIC_API_KEY, GITHUB_TOKEN, WORKER_SECRET,
+# and NEWS_API_KEY for feed ingestion) are set separately with
+# `wrangler secret put <NAME>` — see ../README.md.
 [vars]
 GITHUB_OWNER = "ccgolub2022-web"
 GITHUB_REPO = "svarticles"
@@ -13,3 +19,14 @@ ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 # Comma-separated list of origins allowed to call this Worker from a browser.
 # Add your GitHub Pages URL and any local dev server you test with.
 ALLOWED_ORIGINS = "https://ccgolub2022-web.github.io,http://localhost:8000,http://127.0.0.1:8000"
+
+# --- Feed ingestion config (all optional; defaults live in index.js) ---
+# RSS_FEEDS: comma-separated feed URLs. Defaults cover TechCrunch, Axios,
+#   CNBC (tech), and Fortune. AP News has no reliable RSS, so it's ingested via
+#   NewsAPI's domains filter below instead.
+# RSS_FEEDS = "https://techcrunch.com/feed/,https://api.axios.com/feed/,https://www.cnbc.com/id/19854910/device/rss/rss.html,https://fortune.com/feed/"
+NEWSAPI_DOMAINS = "techcrunch.com,axios.com,cnbc.com,fortune.com,apnews.com"
+NEWSAPI_QUERY = "(AI OR \"artificial intelligence\" OR startup OR startups) AND (workforce OR healthcare OR fintech OR venture OR funding)"
+NEWSAPI_LOOKBACK_HOURS = "48"
+NEWSAPI_PAGE_SIZE = "25"
+MAX_INGEST_PER_RUN = "12"

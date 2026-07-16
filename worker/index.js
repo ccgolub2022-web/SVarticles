@@ -29,6 +29,17 @@ const MAX_EXTRACTED_TEXT = 12000;
 const MAX_FULLTEXT_CHARS = 6000;
 
 export default {
+  // Cron-triggered ingestion (see [triggers].crons in wrangler.toml). Pulls
+  // fresh items from the configured RSS feeds AND NewsAPI, merges them into one
+  // deduped batch, classifies each with Claude, and commits the new records.
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(
+      handleScheduledIngest(env).catch(err =>
+        console.log("Scheduled ingest failed:", String((err && err.message) || err))
+      )
+    );
+  },
+
   async fetch(request, env) {
     const url = new URL(request.url);
     const origin = request.headers.get("Origin") || "";
@@ -51,6 +62,10 @@ export default {
       }
       if (url.pathname === "/update-notes") {
         return json(await handleUpdateNotes(request, env), 200, cors);
+      }
+      if (url.pathname === "/ingest") {
+        // Same pipeline the cron trigger runs, exposed for on-demand testing.
+        return json(await handleScheduledIngest(env), 200, cors);
       }
       return json({ ok: false, error: "Not found" }, 404, cors);
     } catch (err) {
@@ -124,6 +139,321 @@ async function handleUpdateNotes(request, env) {
   await commitArticlesFile(env, articles, sha, `Update notes: ${target.title}`);
 
   return { ok: true };
+}
+
+// ---------------- Scheduled feed ingestion ----------------
+
+// Default RSS feeds for the publishers we track. AP News has no reliable
+// public RSS, so it's covered via NewsAPI's domains filter instead (below).
+// Override any of this with the RSS_FEEDS env var (comma-separated URLs).
+const DEFAULT_RSS_FEEDS = [
+  "https://techcrunch.com/feed/",
+  "https://api.axios.com/feed/",
+  "https://www.cnbc.com/id/19854910/device/rss/rss.html", // CNBC Technology
+  "https://fortune.com/feed/",
+];
+
+const DEFAULT_NEWSAPI_DOMAINS = "techcrunch.com,axios.com,cnbc.com,fortune.com,apnews.com";
+const DEFAULT_NEWSAPI_QUERY =
+  '(AI OR "artificial intelligence" OR startup OR startups) AND (workforce OR healthcare OR fintech OR venture OR funding)';
+
+async function handleScheduledIngest(env) {
+  // Pull both sources in parallel; either failing shouldn't sink the other.
+  const [rssItems, newsItems] = await Promise.all([
+    fetchRssFeeds(env).catch(e => { console.log("RSS fetch error:", String(e)); return []; }),
+    fetchNewsApi(env).catch(e => { console.log("NewsAPI fetch error:", String(e)); return []; }),
+  ]);
+
+  const { articles, sha } = await getArticlesFile(env);
+  const existingUrls = new Set(articles.map(a => normalizeUrl(a.url)));
+
+  // Merge RSS + NewsAPI into one batch, deduping within the batch and against
+  // what's already in the file (match on normalized URL).
+  const seen = new Set();
+  const batch = [];
+  for (const cand of [...rssItems, ...newsItems]) {
+    const key = normalizeUrl(cand.url);
+    if (!key || existingUrls.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    batch.push(cand);
+  }
+
+  const max = Number(env.MAX_INGEST_PER_RUN || 12);
+  const toProcess = batch.slice(0, max);
+
+  const added = [];
+  for (const cand of toProcess) {
+    try {
+      const extracted = await fetchAndExtract(cand.url);
+      const classified = await classifyForIngest(env, { candidate: cand, extracted });
+      // Claude judges relevance for auto-ingested items — skip anything it
+      // flags as off-topic or that it couldn't place in a valid bucket.
+      if (!classified || classified.relevant === false) continue;
+      if (!TAXONOMY.primaryBuckets.includes(classified.primaryBucket)) continue;
+
+      const date = new Date().toISOString().slice(0, 10);
+      const sector = classified.primaryBucket === "General Market"
+        ? null
+        : (TAXONOMY.sectors.includes(classified.sector) ? classified.sector : null);
+      const tags = Array.isArray(classified.tags) ? classified.tags.slice() : [];
+      if (!tags.includes("auto-ingested")) tags.push("auto-ingested");
+
+      const title = classified.title || extracted.title || cand.title || cand.url;
+      const record = {
+        id: uniqueId(date, title, articles),
+        title,
+        url: cand.url,
+        source: classified.source || cand.source || extracted.source || "",
+        slackChannel: "",
+        sender: "",
+        sharedAt: date,
+        whyShared: cand.description
+          ? cand.description
+          : `Auto-ingested from ${classified.source || cand.source || "feed"}.`,
+        primaryBucket: classified.primaryBucket,
+        sector,
+        companyName: classified.companyName || "",
+        tags,
+        imageUrl: extracted.imageUrl || cand.imageUrl || "",
+        summary: classified.summary || "",
+        fullText: (classified.fullText || "").slice(0, MAX_FULLTEXT_CHARS),
+        keyTakeaways: Array.isArray(classified.keyTakeaways) ? classified.keyTakeaways : [],
+        openQuestions: Array.isArray(classified.openQuestions) ? classified.openQuestions : [],
+        myNotes: "",
+        relatedArticleIds: [],
+        dateAdded: date,
+      };
+
+      articles.push(record);
+      existingUrls.add(normalizeUrl(cand.url));
+      added.push(record);
+    } catch (err) {
+      console.log("Ingest failed for", cand.url, String((err && err.message) || err));
+    }
+  }
+
+  if (added.length) {
+    // One commit for the whole batch keeps history tidy and avoids racing the
+    // file's SHA across many writes.
+    await commitArticlesFile(env, articles, sha,
+      `Auto-ingest ${added.length} article(s) from feeds + NewsAPI`);
+  }
+
+  return {
+    ok: true,
+    sources: { rss: rssItems.length, newsapi: newsItems.length },
+    candidates: batch.length,
+    ingested: added.length,
+  };
+}
+
+async function fetchRssFeeds(env) {
+  const feeds = (env.RSS_FEEDS
+    ? env.RSS_FEEDS.split(",").map(s => s.trim()).filter(Boolean)
+    : DEFAULT_RSS_FEEDS);
+
+  const perFeed = await Promise.all(feeds.map(async feedUrl => {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 12000);
+      const res = await fetch(feedUrl, {
+        signal: controller.signal,
+        headers: { "User-Agent": "svarticles-worker (+https://github.com/)" },
+      });
+      clearTimeout(timeout);
+      if (!res || !res.ok) return [];
+      const xml = await res.text();
+      return parseFeed(xml);
+    } catch (e) {
+      console.log("Feed error", feedUrl, String(e));
+      return [];
+    }
+  }));
+
+  return perFeed.flat();
+}
+
+// Minimal RSS 2.0 + Atom parser — no XML library available in Workers, so we
+// pull <item>/<entry> blocks with regex and read their title/link/description.
+function parseFeed(xml) {
+  const items = [];
+  const blocks = xml.match(/<(item|entry)\b[\s\S]*?<\/(item|entry)>/gi) || [];
+  for (const block of blocks) {
+    let link = firstTagText(block, "link").trim();
+    if (!link) {
+      // Atom: <link href="..."/> (prefer rel="alternate" or the first link).
+      const alt = block.match(/<link\b[^>]*rel=["']alternate["'][^>]*href=["']([^"']+)["']/i)
+        || block.match(/<link\b[^>]*href=["']([^"']+)["']/i);
+      if (alt) link = alt[1].trim();
+    }
+    if (!link) continue;
+    const title = firstTagText(block, "title").trim();
+    const description = (firstTagText(block, "description") || firstTagText(block, "summary"))
+      .replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 500);
+    items.push({ url: link, title, source: hostOf(link), description, imageUrl: "" });
+  }
+  return items;
+}
+
+function firstTagText(block, tag) {
+  const re = new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i");
+  const m = block.match(re);
+  if (!m) return "";
+  return decodeXmlEntities(stripCdata(m[1]));
+}
+
+function stripCdata(s) {
+  return String(s || "").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
+}
+
+function decodeXmlEntities(s) {
+  return String(s || "")
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'").replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+}
+
+async function fetchNewsApi(env) {
+  if (!env.NEWS_API_KEY) {
+    console.log("NEWS_API_KEY not set — skipping NewsAPI source.");
+    return [];
+  }
+  const domains = env.NEWSAPI_DOMAINS || DEFAULT_NEWSAPI_DOMAINS;
+  const q = env.NEWSAPI_QUERY || DEFAULT_NEWSAPI_QUERY;
+  const lookbackHours = Number(env.NEWSAPI_LOOKBACK_HOURS || 48);
+  const from = new Date(Date.now() - lookbackHours * 3600 * 1000).toISOString().slice(0, 10);
+  const pageSize = Number(env.NEWSAPI_PAGE_SIZE || 25);
+
+  const params = new URLSearchParams({
+    domains,
+    q,
+    from,
+    sortBy: "publishedAt",
+    language: "en",
+    pageSize: String(pageSize),
+  });
+
+  const res = await fetch(`https://newsapi.org/v2/everything?${params.toString()}`, {
+    headers: { "X-Api-Key": env.NEWS_API_KEY, "User-Agent": "svarticles-worker" },
+  });
+  if (!res.ok) {
+    console.log("NewsAPI HTTP", res.status, (await res.text().catch(() => "")).slice(0, 200));
+    return [];
+  }
+  const data = await res.json();
+  if (data.status !== "ok" || !Array.isArray(data.articles)) {
+    console.log("NewsAPI non-ok payload:", JSON.stringify(data).slice(0, 200));
+    return [];
+  }
+  return data.articles
+    .map(a => ({
+      url: a.url,
+      title: a.title || "",
+      source: (a.source && a.source.name) || hostOf(a.url),
+      description: (a.description || "").slice(0, 500),
+      imageUrl: a.urlToImage || "",
+    }))
+    .filter(c => c.url);
+}
+
+function hostOf(u) {
+  try { return new URL(u).hostname.replace(/^www\./, ""); }
+  catch { return ""; }
+}
+
+// Classification for auto-ingested items. Unlike the form path, nobody chose a
+// bucket/sector here, so Claude picks them — and also judges whether the piece
+// is even relevant to this VC analyst's feed (RSS/NewsAPI are noisy).
+async function classifyForIngest(env, { candidate, extracted }) {
+  const system = `You are curating an inbound research feed for a VC analyst at SemperVirens who invests in
+Workforce, Healthcare, and Fintech, and tracks AI, startups, funding, and the broader market.
+
+These articles were pulled automatically from RSS feeds and NewsAPI — nobody pre-selected them.
+So you must do two things:
+
+1. Decide if the article is RELEVANT to this analyst (set "relevant"). Keep pieces about AI,
+   startups/funding, workforce, healthcare, fintech, major market/tech shifts, or notable
+   private companies. Set relevant=false for sports, celebrity, local crime, generic consumer
+   news, and anything off-thesis — those get dropped.
+
+2. If relevant, CLASSIFY it into exactly one primaryBucket:
+   - "General Market" — macro, public markets, rates, competitive/industry landscape not about
+     one specific company or one of the three sectors. sector MUST be empty for this bucket.
+   - "Enterprise Updates" — sector-level trend pieces about Workforce, Healthcare, or Fintech in
+     general (not one specific company). Set sector.
+   - "Potential Companies" — a specific private/prospective company being tracked (not yet
+     portfolio). Set sector and companyName.
+   - "Portfolio Companies" — a specific current portfolio company. Set sector and companyName.
+   Use sector = "Workforce" | "Healthcare" | "Fintech", or "" if it genuinely fits none.
+   Since you can't know which private companies are actually in the portfolio, prefer
+   "Potential Companies" over "Portfolio Companies" for company-specific private startups.
+
+Be concise, analytical, and synthesis-focused in summary/takeaways — don't restate the article.
+If the extracted text looks empty/thin/paywalled, say so plainly in the summary rather than
+inventing content, and lean on the title/description.
+
+Tags: company names, industry, geography, stage (seed, series-c), event type (product-launch,
+fundraising, leadership-change), and cross-cutting themes (AI, regulation, distribution,
+competition, pricing, workflow). Lowercase, hyphenated.
+
+fullText should be a clean plain-text version of the article body (strip nav/ads/boilerplate),
+up to about 6000 characters, for text-to-speech. Leave it empty if the body wasn't available.`;
+
+  const userMessage = `URL: ${candidate.url}
+Feed-provided title: ${candidate.title || "(none)"}
+Feed-provided source: ${candidate.source || "(none)"}
+Feed-provided description: ${candidate.description || "(none)"}
+
+Extracted page title: ${extracted.title || "(none)"}
+Extracted site/source name: ${extracted.source || "(none)"}
+
+Extracted article text:
+${extracted.text || "(could not fetch article content — page may be paywalled, blocked, or JS-rendered)"}`;
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": env.ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001",
+      max_tokens: 1500,
+      system,
+      messages: [{ role: "user", content: userMessage }],
+      tools: [{
+        name: "record_article",
+        description: "Return the structured research record for this auto-ingested article.",
+        input_schema: {
+          type: "object",
+          properties: {
+            relevant: { type: "boolean", description: "True if this belongs in the analyst's feed; false to drop it." },
+            primaryBucket: { type: "string", enum: TAXONOMY.primaryBuckets, description: "Which of the 4 sections this belongs in." },
+            sector: { type: "string", enum: ["Workforce", "Healthcare", "Fintech", ""], description: "Sector, or \"\" for General Market / none." },
+            title: { type: "string", description: "Real article title (fix up the extracted one if it's messy)." },
+            source: { type: "string", description: "Publisher name, e.g. 'TechCrunch'." },
+            companyName: { type: "string", description: "Specific company this is about, if any. Empty string if not company-specific." },
+            tags: { type: "array", items: { type: "string" } },
+            summary: { type: "string", description: "2-4 sentence synthesis, not a repeat of the article." },
+            keyTakeaways: { type: "array", items: { type: "string" } },
+            openQuestions: { type: "array", items: { type: "string" } },
+            fullText: { type: "string", description: "Clean plain-text article body, up to ~6000 characters. Empty if unavailable." },
+          },
+          required: ["relevant", "primaryBucket", "sector", "title", "source", "companyName", "tags", "summary", "keyTakeaways", "openQuestions", "fullText"],
+        },
+      }],
+      tool_choice: { type: "tool", name: "record_article" },
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Anthropic API error ${res.status}: ${errText.slice(0, 300)}`);
+  }
+  const data = await res.json();
+  const toolUse = (data.content || []).find(b => b.type === "tool_use" && b.name === "record_article");
+  if (!toolUse) throw new Error("Anthropic response had no record_article tool call");
+  return toolUse.input;
 }
 
 // ---------------- Article fetch + extraction ----------------

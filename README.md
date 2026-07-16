@@ -167,6 +167,51 @@ peace of mind you can also add a rate limit in the Cloudflare dashboard
 requests per minute, which bounds worst-case API spend if the URL ever
 leaked.
 
+## Automatic feed ingestion (optional — pulls in articles on its own)
+
+On top of the on-demand "+ Add Article" flow, the same Worker can run on a
+schedule and pull fresh articles in by itself from RSS feeds **and**
+[NewsAPI.org](https://newsapi.org), so relevant pieces show up without anyone
+sharing them first.
+
+How it works: a cron trigger (every 6 hours by default) fetches the configured
+RSS feeds (TechCrunch, Axios, CNBC, Fortune) and queries NewsAPI's
+`/v2/everything` — filtered to the `techcrunch.com, axios.com, cnbc.com,
+fortune.com, apnews.com` domains with keywords for AI / workforce / healthcare
+/ fintech / startups. The two sets are merged into one batch, deduped against
+each other and against what's already in `data/articles.json`, and each new
+item is sent to Claude. Because nobody picked a section for these, **Claude
+classifies them itself** — it chooses the bucket/sector, judges whether the
+piece is even relevant (dropping off-thesis noise), and writes the
+summary/tags/photo just like the manual path. Auto-added records carry an
+`auto-ingested` tag so you can tell them apart or filter them out.
+
+**To turn it on:** add one more secret alongside the three above, then
+redeploy:
+
+```
+cd worker
+npx wrangler secret put NEWS_API_KEY    # from newsapi.org (free developer tier works)
+npx wrangler deploy
+```
+
+- Get the key at [newsapi.org/register](https://newsapi.org/register) — the
+  free developer tier is enough for personal use.
+- **Without `NEWS_API_KEY`, ingestion still runs on the RSS feeds alone** and
+  simply skips the NewsAPI half — so this secret is only needed for the
+  NewsAPI source.
+- Tune it in `worker/wrangler.toml`: the `crons` schedule, the `RSS_FEEDS`
+  list, `NEWSAPI_DOMAINS` / `NEWSAPI_QUERY` / `NEWSAPI_LOOKBACK_HOURS` /
+  `NEWSAPI_PAGE_SIZE`, and `MAX_INGEST_PER_RUN` (how many new articles to
+  process per run, to bound per-run API cost).
+- To test without waiting for the cron, POST to the Worker's `/ingest`
+  endpoint with the `X-Worker-Secret` header (same secret as the app uses).
+- Each ingested article costs one Claude API call, same as a manually added
+  one — `MAX_INGEST_PER_RUN` caps how many run per cycle.
+
+To turn ingestion off entirely, remove the `[triggers]` block from
+`worker/wrangler.toml` and redeploy.
+
 ## Files
 
 - `index.html`, `styles.css`, `app.js` — the page itself
