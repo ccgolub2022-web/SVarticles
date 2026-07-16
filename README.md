@@ -138,11 +138,18 @@ From the `worker/` folder in this repo:
 ```
 cd worker
 npx wrangler login          # opens a browser to connect your Cloudflare account
+npx wrangler d1 create sempervirens-digest    # provisions the D1 database; copy the printed database_id
 npx wrangler secret put ANTHROPIC_API_KEY     # paste the key from step 1
 npx wrangler secret put GITHUB_TOKEN          # paste the token from step 3
 npx wrangler secret put WORKER_SECRET         # make up any long random password — you'll reuse it in step 5
 npx wrangler deploy
 ```
+
+`wrangler d1 create` prints a `database_id` — paste it into the
+`[[d1_databases]]` block in `worker/wrangler.toml` (replacing the
+`REPLACE_WITH_ID_FROM_WRANGLER_D1_CREATE` placeholder) before deploying.
+The database isn't read or written by the Worker yet — this just reserves
+it so nothing has to be re-provisioned once a feature needs it.
 
 `wrangler deploy` prints the Worker's URL, something like
 `https://svarticles-worker.<your-subdomain>.workers.dev`. Copy it.

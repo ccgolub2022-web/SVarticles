@@ -13,3 +13,11 @@ ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 # Comma-separated list of origins allowed to call this Worker from a browser.
 # Add your GitHub Pages URL and any local dev server you test with.
 ALLOWED_ORIGINS = "https://ccgolub2022-web.github.io,http://localhost:8000,http://127.0.0.1:8000"
+
+# D1 database, provisioned separately with `wrangler d1 create sempervirens-digest`
+# (see ../README.md, "Live sync" section). Not read by index.js yet — this just
+# reserves the binding so a database is available once something needs it.
+[[d1_databases]]
+binding = "DIGEST_DB"
+database_name = "sempervirens-digest"
+database_id = "REPLACE_WITH_ID_FROM_WRANGLER_D1_CREATE"
