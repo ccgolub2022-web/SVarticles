@@ -156,10 +156,9 @@ npx wrangler deploy
 `wrangler deploy` prints the Worker's URL, something like
 `https://svarticles-worker.<your-subdomain>.workers.dev`. Copy it.
 
-If your GitHub Pages URL isn't `https://ccgolub2022-web.github.io`, or you
-test locally on a different port, edit `ALLOWED_ORIGINS` in
-`worker/wrangler.toml` to match before deploying (comma-separated list) —
-the Worker only accepts requests from origins on that list.
+The Worker accepts requests from any origin (CORS is open) and relies on the
+`X-Shared-Secret` header as its auth gate — a request without the matching
+secret gets a 401 — so there's no origin allowlist to configure.
 
 **5. Connect the site to it**
 - Open the site, click the **⚙** button in the top bar.
@@ -214,7 +213,7 @@ npx wrangler deploy
   `NEWSAPI_PAGE_SIZE`, and `MAX_INGEST_PER_RUN` (how many new articles to
   process per run, to bound per-run API cost).
 - To test without waiting for the cron, POST to the Worker's `/ingest`
-  endpoint with the `X-Worker-Secret` header (same secret as the app uses).
+  endpoint with the `X-Shared-Secret` header (same secret as the app uses).
 - Each ingested article costs one Claude API call, same as a manually added
   one — `MAX_INGEST_PER_RUN` caps how many run per cycle.
 

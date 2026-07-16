@@ -16,9 +16,9 @@ GITHUB_REPO = "svarticles"
 GITHUB_BRANCH = "main"
 ARTICLES_PATH = "data/articles.json"
 ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
-# Comma-separated list of origins allowed to call this Worker from a browser.
-# Add your GitHub Pages URL and any local dev server you test with.
-ALLOWED_ORIGINS = "https://ccgolub2022-web.github.io,http://localhost:8000,http://127.0.0.1:8000"
+# CORS is intentionally open (Access-Control-Allow-Origin: *) — the
+# X-Shared-Secret header is the auth gate, not origin checking, so there's no
+# origin allowlist to configure.
 
 # --- Feed ingestion config (all optional; defaults live in index.js) ---
 # RSS_FEEDS: comma-separated feed URLs. Defaults cover TechCrunch, Axios,

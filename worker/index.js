@@ -1,7 +1,7 @@
 // SVarticles live-sync Worker.
 //
-// Two endpoints, both POST, both requiring an X-Worker-Secret header that
-// matches the WORKER_SECRET binding:
+// Endpoints (all POST) require an X-Shared-Secret header that matches the
+// WORKER_SECRET binding:
 //
 //   POST /add-article   { url, bucket, sector, sender, channel, quickNote, dateAdded }
 //     -> fetches the article, extracts an image, classifies/summarizes it
@@ -49,11 +49,10 @@ export default {
 
   async fetch(request, env) {
     const url = new URL(request.url);
-    const origin = request.headers.get("Origin") || "";
-    const cors = corsHeaders(origin, env);
+    const cors = corsHeaders();
 
     if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: cors });
+      return new Response(null, { status: 200, headers: cors });
     }
 
     try {
@@ -704,18 +703,18 @@ function githubHeaders(env) {
 // ---------------- Helpers ----------------
 
 function checkSecret(request, env) {
-  const provided = request.headers.get("X-Worker-Secret") || "";
+  const provided = request.headers.get("X-Shared-Secret") || "";
   return env.WORKER_SECRET && provided === env.WORKER_SECRET;
 }
 
-function corsHeaders(origin, env) {
-  const allowed = (env.ALLOWED_ORIGINS || "").split(",").map(s => s.trim()).filter(Boolean);
-  const headers = {
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-Worker-Secret",
+function corsHeaders() {
+  // Origin is not the auth gate — the X-Shared-Secret header is (see
+  // checkSecret). Any origin may call; without the secret it gets a 401.
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "X-Shared-Secret, Content-Type",
+    "Access-Control-Allow-Methods": "GET, POST, PATCH, OPTIONS",
   };
-  if (allowed.includes(origin)) headers["Access-Control-Allow-Origin"] = origin;
-  return headers;
 }
 
 function json(obj, status, corsHdrs) {

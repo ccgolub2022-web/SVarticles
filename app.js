@@ -48,7 +48,7 @@ async function callWorker(path, payload) {
     const res = await fetch(url + path, {
       method: "POST",
       signal: controller.signal,
-      headers: { "Content-Type": "application/json", "X-Worker-Secret": secret },
+      headers: { "Content-Type": "application/json", "X-Shared-Secret": secret },
       body: JSON.stringify(payload),
     });
     const data = await res.json().catch(() => ({}));
