@@ -246,6 +246,36 @@ body.sidebar-collapsed { grid-template-columns: 68px 1fr; }
 }
 .add-article-btn-hero:hover { filter: brightness(1.06); }
 
+.icon-btn {
+  width: 36px;
+  padding: 0;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.icon-btn.live-active { color: var(--good); border-color: var(--good); }
+.icon-btn.live-active::after {
+  content: "";
+  position: absolute;
+  top: 5px; right: 5px;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--good);
+}
+
+.settings-note { font-size: 11.5px; color: var(--text-faint); margin: -4px 0 8px; }
+
+.notes-save-status {
+  font-size: 10.5px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-faint);
+  margin-left: 8px;
+}
+
 /* ---------- Home / landing ---------- */
 
 .hero {

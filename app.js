@@ -1,17 +1,98 @@
-// SVarticles front end. Reads TAXONOMY + ARTICLES from data/articles.js.
+// SVarticles front end. Loads data/articles.json + data/roundups.json at
+// startup (fetch, not <script> tags, so a backend can safely read/write them
+// as plain JSON).
 //
-// Two localStorage overlays sit on top of the repo's data/articles.js:
-//  - notes overlay: personal "My notes" text typed into any article
-//  - pending queue: links added via "+ Add Article" that Claude hasn't
-//    written up yet (rendered inline in whichever section you assigned them
-//    to, tagged "awaiting summary")
-// Neither is written back to the repo automatically. Click "Sync with
-// Claude" to get a paste-ready payload, hand it to Claude in a chat, and it
-// will fetch/classify the links and merge everything into data/articles.js.
+// Two paths add/update articles:
+//  - Live: if a Worker URL is configured (see Settings), "+ Add Article" and
+//    note edits POST directly to it — it fetches the article, classifies it
+//    with the Anthropic API, and commits the result to GitHub. Feels instant.
+//  - Manual fallback: if no Worker is configured (or a request fails), new
+//    links queue in a local pending list and notes save to a local overlay;
+//    "Sync with Claude" bundles both into a paste-ready payload for a Claude
+//    chat to process by hand. Nothing is ever silently lost.
 
 const NOTES_KEY = "sva_notes_overlay_v1";
 const PENDING_KEY = "sva_pending_queue_v2";
 const SIDEBAR_KEY = "sva_sidebar_collapsed_v1";
+const WORKER_URL_KEY = "sva_worker_url_v1";
+const WORKER_SECRET_KEY = "sva_worker_secret_v1";
+const LIVE_OVERLAY_KEY = "sva_live_added_v1";
+
+// ---------------- Live sync (Cloudflare Worker) ----------------
+
+function loadWorkerConfig() {
+  return {
+    url: (localStorage.getItem(WORKER_URL_KEY) || "").trim().replace(/\/$/, ""),
+    secret: localStorage.getItem(WORKER_SECRET_KEY) || "",
+  };
+}
+function saveWorkerConfig(url, secret) {
+  localStorage.setItem(WORKER_URL_KEY, url.trim().replace(/\/$/, ""));
+  localStorage.setItem(WORKER_SECRET_KEY, secret);
+}
+function clearWorkerConfig() {
+  localStorage.removeItem(WORKER_URL_KEY);
+  localStorage.removeItem(WORKER_SECRET_KEY);
+}
+function isLiveConfigured() {
+  const c = loadWorkerConfig();
+  return !!(c.url && c.secret);
+}
+
+async function callWorker(path, payload) {
+  const { url, secret } = loadWorkerConfig();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45000);
+  try {
+    const res = await fetch(url + path, {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json", "X-Worker-Secret": secret },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      throw new Error(data.error || `Worker returned ${res.status}`);
+    }
+    return data;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// Articles the Worker has fully processed and committed, shown immediately
+// in this browser without waiting for GitHub Pages to redeploy. Once the
+// real data/articles.json catches up (contains the same id), the overlay
+// entry is dropped automatically so it doesn't create a lasting duplicate.
+function loadLiveOverlay() {
+  try { return JSON.parse(localStorage.getItem(LIVE_OVERLAY_KEY) || "[]"); }
+  catch { return []; }
+}
+function addToLiveOverlay(article) {
+  const list = loadLiveOverlay();
+  list.unshift(article);
+  localStorage.setItem(LIVE_OVERLAY_KEY, JSON.stringify(list));
+}
+function updateLiveOverlayNotes(id, myNotes) {
+  const list = loadLiveOverlay();
+  const item = list.find(a => a.id === id);
+  if (item) {
+    item.myNotes = myNotes;
+    localStorage.setItem(LIVE_OVERLAY_KEY, JSON.stringify(list));
+  }
+}
+
+const TAXONOMY = {
+  primaryBuckets: ["General Market", "Enterprise Updates", "Portfolio Companies", "Potential Companies"],
+  // Sector applies to every bucket except General Market (which uses tags instead).
+  sectorBuckets: ["Enterprise Updates", "Portfolio Companies", "Potential Companies"],
+  sectors: ["Workforce", "Healthcare", "Fintech"],
+  crossCuttingThemes: ["AI", "regulation", "distribution", "competition", "pricing", "workflow"]
+};
+
+// Populated by loadData() before first render — empty until then.
+let ARTICLES = [];
+let ROUNDUPS = [];
 
 const CATEGORY_META = [
   { bucket: "General Market", abbr: "GM", tagline: "Macro, public markets, and broad industry trends." },
@@ -183,6 +264,29 @@ function saveNoteOverlay(id, text) {
   renderSyncIndicator();
 }
 
+const notesSaveTimers = {};
+const NOTES_SAVE_DEBOUNCE_MS = 2500;
+
+// Local save (above) is instant and always happens. If live sync is
+// configured, this additionally schedules a debounced commit to GitHub via
+// the Worker after the user stops typing, so notes don't need a manual
+// "Sync with Claude" round trip either.
+function scheduleLiveNotesSave(id, text, statusEl) {
+  if (!isLiveConfigured()) return;
+  clearTimeout(notesSaveTimers[id]);
+  if (statusEl) statusEl.textContent = "Unsaved…";
+  notesSaveTimers[id] = setTimeout(async () => {
+    if (statusEl) statusEl.textContent = "Saving…";
+    try {
+      await callWorker("/update-notes", { id, myNotes: text });
+      updateLiveOverlayNotes(id, text);
+      if (statusEl) statusEl.textContent = "Saved";
+    } catch (err) {
+      if (statusEl) statusEl.textContent = "Save failed — will go out with your next Claude sync";
+    }
+  }, NOTES_SAVE_DEBOUNCE_MS);
+}
+
 function loadPendingQueue() {
   try { return JSON.parse(localStorage.getItem(PENDING_KEY) || "[]"); }
   catch { return []; }
@@ -239,8 +343,15 @@ function pendingToArticle(p, overlay) {
 function mergedArticles() {
   const overlay = loadNotesOverlay();
   const base = ARTICLES.map(a => overlay[a.id] !== undefined ? { ...a, myNotes: overlay[a.id] } : a);
+  const baseIds = new Set(base.map(a => a.id));
+  // Live-added articles the Worker already committed, shown instantly while
+  // GitHub Pages catches up. Once articles.json actually contains the id,
+  // drop the local copy so it doesn't linger as a duplicate.
+  const live = loadLiveOverlay()
+    .filter(a => !baseIds.has(a.id))
+    .map(a => overlay[a.id] !== undefined ? { ...a, myNotes: overlay[a.id] } : a);
   const pending = loadPendingQueue().map(p => pendingToArticle(p, overlay));
-  return pending.concat(base);
+  return pending.concat(live).concat(base);
 }
 
 function isUnread(a) {
@@ -756,12 +867,16 @@ function renderCard(a) {
 
   const notesField = document.createElement("div");
   notesField.className = "field";
-  notesField.innerHTML = `<div class="field-label">My notes</div>`;
+  notesField.innerHTML = `<div class="field-label">My notes<span class="notes-save-status"></span></div>`;
+  const statusEl = notesField.querySelector(".notes-save-status");
   const textarea = document.createElement("textarea");
   textarea.className = "notes-textarea";
   textarea.placeholder = "What did you take away from this? Anything to revisit?";
   textarea.value = a.myNotes || "";
-  textarea.addEventListener("input", () => saveNoteOverlay(a.id, textarea.value));
+  textarea.addEventListener("input", () => {
+    saveNoteOverlay(a.id, textarea.value);
+    scheduleLiveNotesSave(a.id, textarea.value, statusEl);
+  });
   notesField.appendChild(textarea);
   body.appendChild(notesField);
 
@@ -811,34 +926,71 @@ function openAddModal() {
   document.getElementById("addNoteInput").value = "";
   document.getElementById("addDateDisplay").textContent = new Date().toISOString().slice(0, 10);
   document.getElementById("addFormError").style.display = "none";
+  document.getElementById("addModalModeText").textContent = isLiveConfigured()
+    ? "it'll process live — summary, tags, and photo appear in about 15–30 seconds."
+    : "Claude fills in the summary, tags, and photo when you sync.";
   updateAddModalSectorState();
+  setAddModalBusy(false);
   document.getElementById("addModal").classList.add("open");
   setTimeout(() => document.getElementById("addUrlInput").focus(), 50);
 }
 function closeAddModal() {
   document.getElementById("addModal").classList.remove("open");
 }
-function submitAddModal() {
+function setAddModalBusy(busy, label) {
+  const btn = document.getElementById("submitAddModalBtn");
+  btn.disabled = busy;
+  btn.textContent = busy ? (label || "Adding…") : "Add article";
+  document.getElementById("closeAddModalBtn").disabled = busy;
+}
+
+async function submitAddModal() {
   const urlInput = document.getElementById("addUrlInput");
   const bucketInput = document.getElementById("addBucketInput");
   const errorEl = document.getElementById("addFormError");
+  errorEl.style.display = "none";
   let url = urlInput.value.trim();
 
   if (!url) { errorEl.textContent = "Add a link first."; errorEl.style.display = "block"; urlInput.focus(); return; }
   if (!bucketInput.value) { errorEl.textContent = "Choose which section this belongs in."; errorEl.style.display = "block"; bucketInput.focus(); return; }
   if (!/^https?:\/\//i.test(url)) url = "https://" + url;
 
-  addPendingArticle({
+  const bucket = bucketInput.value;
+  const payload = {
     url,
-    bucket: bucketInput.value,
+    bucket,
     sector: document.getElementById("addSectorInput").value,
     sender: document.getElementById("addSenderInput").value.trim(),
     channel: document.getElementById("addChannelInput").value.trim(),
     quickNote: document.getElementById("addNoteInput").value.trim(),
-  });
+    dateAdded: new Date().toISOString().slice(0, 10),
+  };
 
+  if (isLiveConfigured()) {
+    setAddModalBusy(true, "Fetching & classifying…");
+    try {
+      const data = await callWorker("/add-article", payload);
+      addToLiveOverlay(data.article);
+      closeAddModal();
+      state.expanded.add(data.article.id);
+      setState({ view: "section", bucket, sector: null, tag: null, pendingOnly: false });
+      return;
+    } catch (err) {
+      // Fall through to the local-queue fallback so nothing is lost — but
+      // tell the user live sync failed rather than pretending it worked.
+      addPendingArticle(payload);
+      closeAddModal();
+      setState({ view: "section", bucket, sector: null, tag: null, pendingOnly: false });
+      alert(`Live sync failed (${err.message}). Added to the local queue instead — use “Sync with Claude” to finish it manually.`);
+      return;
+    } finally {
+      setAddModalBusy(false);
+    }
+  }
+
+  addPendingArticle(payload);
   closeAddModal();
-  setState({ view: "section", bucket: bucketInput.value, sector: null, tag: null, pendingOnly: false });
+  setState({ view: "section", bucket, sector: null, tag: null, pendingOnly: false });
 }
 
 // ---------------- Sync with Claude ----------------
@@ -864,7 +1016,7 @@ function openSyncModal() {
       const note = overlay[p.id] && overlay[p.id].trim().length ? overlay[p.id] : p.quickNote;
       return `  { url: ${JSON.stringify(p.url)}, bucket: ${JSON.stringify(p.bucket)}, sector: ${JSON.stringify(p.sector)}, sender: ${JSON.stringify(p.sender)}, channel: ${JSON.stringify(p.channel)}, quickNote: ${JSON.stringify(note)}, dateAdded: ${JSON.stringify(p.dateAdded)} },`;
     });
-    parts.push(`// New links — fetch each URL, classify per CLAUDE.md, and add full records to data/articles.js\n// (bucket/sector are already chosen — keep them as-is)\nconst NEW_LINKS = [\n${lines.join("\n")}\n];`);
+    parts.push(`// New links — fetch each URL, classify per CLAUDE.md, and add full records to data/articles.json\n// (bucket/sector are already chosen — keep them as-is)\nconst NEW_LINKS = [\n${lines.join("\n")}\n];`);
   }
   if (noteEntries.length) {
     const lines = noteEntries.map(([id, notes]) => `  { id: ${JSON.stringify(id)}, myNotes: ${JSON.stringify(notes)} },`);
@@ -882,20 +1034,85 @@ function closeSyncModal() {
   document.getElementById("syncModal").classList.remove("open");
 }
 function clearPendingQueue() {
-  if (!confirm("Clear the pending queue? Only do this after Claude has added these links to data/articles.js.")) return;
+  if (!confirm("Clear the pending queue? Only do this after Claude has added these links to data/articles.json.")) return;
   savePendingQueue([]);
   renderSidebar();
   renderMain();
   closeSyncModal();
 }
 
+// ---------------- Data loading ----------------
+
+async function loadData() {
+  const [articlesRes, roundupsRes] = await Promise.all([
+    fetch("data/articles.json"),
+    fetch("data/roundups.json"),
+  ]);
+  if (!articlesRes.ok || !roundupsRes.ok) throw new Error("Failed to load data files");
+  ARTICLES = await articlesRes.json();
+  ROUNDUPS = await roundupsRes.json();
+}
+
+// ---------------- Settings (live sync) ----------------
+
+function renderSettingsIndicator() {
+  const btn = document.getElementById("settingsBtn");
+  btn.classList.toggle("live-active", isLiveConfigured());
+  btn.title = isLiveConfigured() ? "Live sync settings (on)" : "Live sync settings (off — using manual Sync with Claude)";
+}
+
+function openSettingsModal() {
+  const cfg = loadWorkerConfig();
+  document.getElementById("settingsWorkerUrl").value = cfg.url;
+  document.getElementById("settingsWorkerSecret").value = cfg.secret;
+  document.getElementById("settingsStatus").style.display = "none";
+  document.getElementById("settingsModal").classList.add("open");
+}
+function closeSettingsModal() {
+  document.getElementById("settingsModal").classList.remove("open");
+}
+function saveSettings() {
+  const url = document.getElementById("settingsWorkerUrl").value.trim();
+  const secret = document.getElementById("settingsWorkerSecret").value.trim();
+  const statusEl = document.getElementById("settingsStatus");
+  if (url && !/^https?:\/\//i.test(url)) {
+    statusEl.textContent = "Worker URL should start with https://";
+    statusEl.style.display = "block";
+    return;
+  }
+  saveWorkerConfig(url, secret);
+  renderSettingsIndicator();
+  closeSettingsModal();
+}
+function clearSettingsAndClose() {
+  clearWorkerConfig();
+  renderSettingsIndicator();
+  closeSettingsModal();
+}
+
 // ---------------- Init ----------------
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   setSidebarCollapsed(isSidebarCollapsed());
+
+  const content = document.getElementById("content");
+  content.innerHTML = '<div class="empty-state">Loading…</div>';
+  try {
+    await loadData();
+  } catch (e) {
+    content.innerHTML = '<div class="empty-state">Couldn’t load article data (data/articles.json). Try refreshing the page.</div>';
+    return;
+  }
+
   renderSidebar();
   renderMain();
   renderSyncIndicator();
+  renderSettingsIndicator();
+
+  document.getElementById("settingsBtn").addEventListener("click", openSettingsModal);
+  document.getElementById("closeSettingsModalBtn").addEventListener("click", closeSettingsModal);
+  document.getElementById("saveSettingsBtn").addEventListener("click", saveSettings);
+  document.getElementById("settingsClearBtn").addEventListener("click", clearSettingsAndClose);
 
   document.getElementById("sidebarToggleBtn").addEventListener("click", () => {
     setSidebarCollapsed(!isSidebarCollapsed());

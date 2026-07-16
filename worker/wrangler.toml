@@ -1,0 +1,15 @@
+name = "svarticles-worker"
+main = "index.js"
+compatibility_date = "2025-01-01"
+
+# Non-secret config. Secrets (ANTHROPIC_API_KEY, GITHUB_TOKEN, WORKER_SECRET)
+# are set separately with `wrangler secret put <NAME>` — see ../README.md.
+[vars]
+GITHUB_OWNER = "ccgolub2022-web"
+GITHUB_REPO = "svarticles"
+GITHUB_BRANCH = "main"
+ARTICLES_PATH = "data/articles.json"
+ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
+# Comma-separated list of origins allowed to call this Worker from a browser.
+# Add your GitHub Pages URL and any local dev server you test with.
+ALLOWED_ORIGINS = "https://ccgolub2022-web.github.io,http://localhost:8000,http://127.0.0.1:8000"

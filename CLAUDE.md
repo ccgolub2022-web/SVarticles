@@ -6,8 +6,15 @@ taggable research page covering general market news, enterprise/industry updates
 portfolio companies, and potential companies.
 
 The site itself is `index.html` + `styles.css` + `app.js`, reading its data
-from `data/articles.js`. There is no backend — it's a static page opened
-directly in a browser (or hosted on GitHub Pages).
+from `data/articles.jsonon` (fetched at load time, so it must stay valid JSON —
+no comments, no trailing commas). It's a static page (hosted on GitHub
+Pages) with one optional piece of live infrastructure: `worker/` is a
+Cloudflare Worker the user can deploy so "+ Add Article" and note edits
+happen automatically instead of going through you. See `worker/index.js` and
+the README's "Live sync" section if asked about that path — it mirrors the
+same classification rules documented here, just running unattended. Most of
+your job is unchanged either way: when the Worker isn't configured (or a
+request to it fails), everything falls back to the manual flow below.
 
 ## Your job in this repo
 
@@ -29,7 +36,7 @@ it the bucket is already decided. Clicking **Sync with Claude** gives you a
 payload shaped like:
 
 ```js
-// New links — fetch each URL, classify per CLAUDE.md, and add full records to data/articles.js
+// New links — fetch each URL, classify per CLAUDE.md, and add full records to data/articles.json
 const NEW_LINKS = [
   { url: "...", bucket: "...", sector: "...", sender: "...", channel: "...", quickNote: "...", dateAdded: "2026-07-13" },
 ];
@@ -61,16 +68,17 @@ For each `NEW_LINKS` entry:
    `dateAdded` → both `sharedAt` and `dateAdded` unless the article text
    reveals a more precise shared time.
 6. Write the summary/takeaways/tags per the tone and tagging rules below,
-   then append the full record to `ARTICLES` in `data/articles.js`.
+   then append the full record to the array in `data/articles.json` (valid
+   JSON only — no comments, no trailing commas).
 
 For each `NOTES_UPDATES` entry, find the existing article by `id` in
-`data/articles.js` and overwrite its `myNotes` field.
+`data/articles.json` and overwrite its `myNotes` field.
 
 After processing a sync payload, commit, and tell the user it's safe to
 click **Clear synced queue** in the app (this only clears their local
 pending-links cache, it doesn't touch the repo).
 
-Always read the current `data/articles.js` before adding to it, so you don't
+Always read the current `data/articles.json` before adding to it, so you don't
 duplicate an article (match on `url` first) and so new tags/company names stay
 consistent with ones already used.
 
@@ -107,7 +115,10 @@ stage (e.g. `seed`, `series-c`), event type (e.g. `product-launch`,
 `regulation`, `distribution`, `competition`, `pricing`, `workflow`. Use
 lowercase, hyphenated tags for consistency (e.g. `series-c`, `product-launch`).
 
-## Record schema (`data/articles.js`)
+## Record schema (`data/articles.json`)
+
+Shape below is annotated for reference only — the actual file is plain JSON
+(quoted keys, no comments, no trailing commas).
 
 ```js
 {
@@ -150,11 +161,13 @@ so the page clusters them together, even across different primary buckets.
 
 ## Weekly Roundup
 
-When the user asks for "this week's roundup" (or similar — "summarize this
-week", "what came in this week"), read every article in `data/articles.js`
-with `dateAdded` in the requested week (default: the last 7 days, Monday
-through Sunday) and write one record to the `ROUNDUPS` array in
-`data/roundups.js`:
+This one stays manual even when live sync is set up — the Worker only
+handles new articles and note edits, not roundups. When the user asks for
+"this week's roundup" (or similar — "summarize this week", "what came in
+this week"), read every article in `data/articles.json` with `dateAdded` in
+the requested week (default: the last 7 days, Monday through Sunday) and
+append one record to the array in `data/roundups.json` (valid JSON, no
+comments/trailing commas — the shape below is annotated for reference only):
 
 ```js
 {

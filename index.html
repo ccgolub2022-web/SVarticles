@@ -27,14 +27,39 @@
       <input id="searchInput" class="search-input" type="text" placeholder="Search titles, companies, tags..." />
       <button id="addArticleBtn" class="btn add-article-btn"><span class="plus">+</span> Add Article</button>
       <button id="syncBtn" class="btn">Sync with Claude</button>
+      <button id="settingsBtn" class="btn icon-btn" title="Live sync settings">⚙</button>
     </div>
     <div id="content"></div>
   </main>
 
+  <div class="modal-backdrop" id="settingsModal">
+    <div class="modal">
+      <h3>Live sync settings</h3>
+      <p>Connect the site to your Cloudflare Worker so "+ Add Article" and note edits save automatically instead of needing a manual Claude sync. See the README for how to deploy the Worker first.</p>
+
+      <div class="form-field">
+        <label class="form-label" for="settingsWorkerUrl">Worker URL</label>
+        <input id="settingsWorkerUrl" class="form-input" type="text" placeholder="https://svarticles-worker.your-name.workers.dev" />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="settingsWorkerSecret">Worker secret</label>
+        <input id="settingsWorkerSecret" class="form-input" type="password" placeholder="The WORKER_SECRET you set with wrangler" />
+      </div>
+      <p class="settings-note">Stored only in this browser's local storage — never committed to the repo or visible to anyone else viewing the site.</p>
+      <div id="settingsStatus" class="form-error" style="display:none;"></div>
+
+      <div class="modal-actions">
+        <button class="btn" id="settingsClearBtn">Turn off live sync</button>
+        <button class="btn" id="closeSettingsModalBtn">Close</button>
+        <button class="btn primary" id="saveSettingsBtn">Save</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="addModal">
     <div class="modal">
       <h3>Add article</h3>
-      <p>Drop in a link and pick where it belongs — Claude fills in the summary, tags, and photo when you sync.</p>
+      <p>Drop in a link and pick where it belongs — <span id="addModalModeText">Claude fills in the summary, tags, and photo when you sync.</span></p>
 
       <div class="form-field">
         <label class="form-label" for="addUrlInput">Link *</label>
@@ -91,7 +116,7 @@
   <div class="modal-backdrop" id="syncModal">
     <div class="modal">
       <h3>Sync with Claude</h3>
-      <p>Copy this and paste it to Claude in this repo. It will fetch and classify any new links and merge your notes into <code>data/articles.js</code>.</p>
+      <p>Copy this and paste it to Claude in this repo. It will fetch and classify any new links and merge your notes into <code>data/articles.json</code>.</p>
       <textarea id="syncTextarea" class="modal-code-textarea" readonly></textarea>
       <div class="modal-actions">
         <button class="btn" id="clearPendingBtn" style="display:none;">Clear synced queue</button>
@@ -116,8 +141,6 @@
     </div>
   </div>
 
-  <script src="data/articles.js"></script>
-  <script src="data/roundups.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
