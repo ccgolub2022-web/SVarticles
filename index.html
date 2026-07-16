@@ -26,6 +26,7 @@
     <div class="topbar">
       <input id="searchInput" class="search-input" type="text" placeholder="Search titles, companies, tags..." />
       <button id="addArticleBtn" class="btn add-article-btn"><span class="plus">+</span> Add Article</button>
+      <button id="writeArticleBtn" class="btn" title="Write an article entry yourself — no link needed">✎ Write your own</button>
       <button id="syncBtn" class="btn">Sync with Claude</button>
       <button id="settingsBtn" class="btn icon-btn" title="Live sync settings">⚙</button>
     </div>
@@ -109,6 +110,85 @@
       <div class="modal-actions">
         <button class="btn" id="closeAddModalBtn">Cancel</button>
         <button class="btn primary" id="submitAddModalBtn">Add article</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="manualModal">
+    <div class="modal">
+      <h3>Write your own article</h3>
+      <p>Fill this in yourself — good for something with no link, a paywalled piece, or a thought you want to log. <span id="manualModalModeText">Claude isn't involved; it saves as-is.</span></p>
+
+      <div class="form-field">
+        <label class="form-label" for="manualTitleInput">Title *</label>
+        <input id="manualTitleInput" class="form-input" type="text" placeholder="What is this about?" />
+      </div>
+      <div class="form-row">
+        <div class="form-field">
+          <label class="form-label" for="manualBucketInput">Section *</label>
+          <select id="manualBucketInput" class="form-input">
+            <option value="" disabled selected>Choose a section...</option>
+            <option value="General Market">General Market</option>
+            <option value="Enterprise Updates">Enterprise Updates</option>
+            <option value="Portfolio Companies">Portfolio Companies</option>
+            <option value="Potential Companies">Potential Companies</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="manualSectorInput">Sector</label>
+          <select id="manualSectorInput" class="form-input">
+            <option value="">Unspecified</option>
+            <option value="Workforce">Workforce</option>
+            <option value="Healthcare">Healthcare</option>
+            <option value="Fintech">Fintech</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-field">
+          <label class="form-label" for="manualCompanyInput">Company (if any)</label>
+          <input id="manualCompanyInput" class="form-input" type="text" placeholder="e.g. Ramp" />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="manualSourceInput">Source / publisher</label>
+          <input id="manualSourceInput" class="form-input" type="text" placeholder="e.g. TechCrunch, or your own note" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-field">
+          <label class="form-label" for="manualUrlInput">Link (optional)</label>
+          <input id="manualUrlInput" class="form-input" type="text" placeholder="https://... (leave blank if none)" />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="manualSenderInput">Who sent it (optional)</label>
+          <input id="manualSenderInput" class="form-input" type="text" placeholder="e.g. Dana K." />
+        </div>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="manualSummaryInput">Summary</label>
+        <textarea id="manualSummaryInput" class="form-input form-textarea" placeholder="A few sentences on what this is and why it matters."></textarea>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="manualTakeawaysInput">Key takeaways (one per line)</label>
+        <textarea id="manualTakeawaysInput" class="form-input form-textarea" placeholder="One bullet per line"></textarea>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="manualTagsInput">Tags (comma-separated)</label>
+        <input id="manualTagsInput" class="form-input" type="text" placeholder="e.g. ai, fundraising, series-c" />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="manualNotesInput">My notes (optional)</label>
+        <textarea id="manualNotesInput" class="form-input form-textarea" placeholder="Your private notes."></textarea>
+      </div>
+      <div class="form-field">
+        <span class="form-label">Date added</span>
+        <div class="form-static" id="manualDateDisplay"></div>
+      </div>
+      <div class="form-error" id="manualFormError" style="display:none;"></div>
+
+      <div class="modal-actions">
+        <button class="btn" id="closeManualModalBtn">Cancel</button>
+        <button class="btn primary" id="submitManualModalBtn">Save article</button>
       </div>
     </div>
   </div>

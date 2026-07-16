@@ -16,6 +16,13 @@ same classification rules documented here, just running unattended. Most of
 your job is unchanged either way: when the Worker isn't configured (or a
 request to it fails), everything falls back to the manual flow below.
 
+The Worker can also run on a schedule to **auto-ingest** articles from RSS
+feeds and NewsAPI (see the README's "Automatic feed ingestion" section). This
+is the one path where the section isn't user-chosen — the Worker asks Claude to
+pick the `primaryBucket`/`sector` and to drop off-thesis items, and tags each
+record `auto-ingested`. Records with that tag came in this way; everything else
+was assigned by the user.
+
 ## Your job in this repo
 
 The user always assigns the section (and sector, where relevant) themselves
@@ -70,6 +77,14 @@ For each `NEW_LINKS` entry:
 6. Write the summary/takeaways/tags per the tone and tagging rules below,
    then append the full record to the array in `data/articles.json` (valid
    JSON only — no comments, no trailing commas).
+
+A sync payload may also contain a `MANUAL_ARTICLES` array — full records the
+user wrote themselves via the **Write your own** form (title, summary,
+takeaways, tags, notes all already filled in). For each of these, **append the
+record to `data/articles.json` as-is** — don't refetch a URL, reclassify, or
+rewrite the summary. Just sanity-check the JSON and, if the `id` collides with
+an existing one, give it a unique suffix. These have no `og:image`, so leave
+`imageUrl` as whatever's given (usually `""`).
 
 For each `NOTES_UPDATES` entry, find the existing article by `id` in
 `data/articles.json` and overwrite its `myNotes` field.

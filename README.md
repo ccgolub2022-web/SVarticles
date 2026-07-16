@@ -72,6 +72,15 @@ You can also skip the "+" step entirely and just paste a Slack message
 (link + why it was shared + who/where + which section) straight to Claude in
 chat — same result, no live sync required.
 
+**Prefer to write one up yourself?** Click **✎ Write your own** next to "+ Add
+Article." That opens a form where *you* type the title, section, summary, key
+takeaways, tags, and notes — no link and no Claude required. It's handy for a
+piece with no URL, something paywalled, or a thought you just want to log. It
+saves the same way everything else does: with live sync on it goes straight to
+the repo; with live sync off it shows up right away tagged **"not yet synced"**
+and goes out with your next **Sync with Claude** (Claude appends it as-is —
+it won't rewrite what you wrote).
+
 Notes you type in any article's "My notes" box always save locally in your
 browser instantly; with live sync on they also auto-save to the repo a couple
 seconds after you stop typing (look for "Saved" under the notes label).
@@ -147,10 +156,9 @@ npx wrangler deploy
 `wrangler deploy` prints the Worker's URL, something like
 `https://svarticles-worker.<your-subdomain>.workers.dev`. Copy it.
 
-If your GitHub Pages URL isn't `https://ccgolub2022-web.github.io`, or you
-test locally on a different port, edit `ALLOWED_ORIGINS` in
-`worker/wrangler.toml` to match before deploying (comma-separated list) —
-the Worker only accepts requests from origins on that list.
+The Worker accepts requests from any origin (CORS is open) and relies on the
+`X-Shared-Secret` header as its auth gate — a request without the matching
+secret gets a 401 — so there's no origin allowlist to configure.
 
 **5. Connect the site to it**
 - Open the site, click the **⚙** button in the top bar.
@@ -166,6 +174,51 @@ peace of mind you can also add a rate limit in the Cloudflare dashboard
 (Workers & Pages → your Worker → Settings → Triggers → Rate limiting) to cap
 requests per minute, which bounds worst-case API spend if the URL ever
 leaked.
+
+## Automatic feed ingestion (optional — pulls in articles on its own)
+
+On top of the on-demand "+ Add Article" flow, the same Worker can run on a
+schedule and pull fresh articles in by itself from RSS feeds **and**
+[NewsAPI.org](https://newsapi.org), so relevant pieces show up without anyone
+sharing them first.
+
+How it works: a cron trigger (every 6 hours by default) fetches the configured
+RSS feeds (TechCrunch, Axios, CNBC, Fortune) and queries NewsAPI's
+`/v2/everything` — filtered to the `techcrunch.com, axios.com, cnbc.com,
+fortune.com, apnews.com` domains with keywords for AI / workforce / healthcare
+/ fintech / startups. The two sets are merged into one batch, deduped against
+each other and against what's already in `data/articles.json`, and each new
+item is sent to Claude. Because nobody picked a section for these, **Claude
+classifies them itself** — it chooses the bucket/sector, judges whether the
+piece is even relevant (dropping off-thesis noise), and writes the
+summary/tags/photo just like the manual path. Auto-added records carry an
+`auto-ingested` tag so you can tell them apart or filter them out.
+
+**To turn it on:** add one more secret alongside the three above, then
+redeploy:
+
+```
+cd worker
+npx wrangler secret put NEWS_API_KEY    # from newsapi.org (free developer tier works)
+npx wrangler deploy
+```
+
+- Get the key at [newsapi.org/register](https://newsapi.org/register) — the
+  free developer tier is enough for personal use.
+- **Without `NEWS_API_KEY`, ingestion still runs on the RSS feeds alone** and
+  simply skips the NewsAPI half — so this secret is only needed for the
+  NewsAPI source.
+- Tune it in `worker/wrangler.toml`: the `crons` schedule, the `RSS_FEEDS`
+  list, `NEWSAPI_DOMAINS` / `NEWSAPI_QUERY` / `NEWSAPI_LOOKBACK_HOURS` /
+  `NEWSAPI_PAGE_SIZE`, and `MAX_INGEST_PER_RUN` (how many new articles to
+  process per run, to bound per-run API cost).
+- To test without waiting for the cron, POST to the Worker's `/ingest`
+  endpoint with the `X-Shared-Secret` header (same secret as the app uses).
+- Each ingested article costs one Claude API call, same as a manually added
+  one — `MAX_INGEST_PER_RUN` caps how many run per cycle.
+
+To turn ingestion off entirely, remove the `[triggers]` block from
+`worker/wrangler.toml` and redeploy.
 
 ## Files
 
