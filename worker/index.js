@@ -12,6 +12,13 @@
 //     -> finds the article by id in data/articles.json and overwrites
 //        myNotes, committing the change.
 //
+//   POST /add-manual    { record: { title, primaryBucket, ... } }
+//     -> commits a fully user-authored article (the app's "Write your own"
+//        form) as-is, no fetch/classify. Returns the finished record.
+//
+// Plus a cron-triggered scheduled() handler (and a POST /ingest that runs the
+// same pipeline on demand) that auto-ingests from RSS + NewsAPI.
+//
 // See ../CLAUDE.md for the classification rules this mirrors, and
 // ../README.md for deployment instructions.
 
@@ -62,6 +69,9 @@ export default {
       }
       if (url.pathname === "/update-notes") {
         return json(await handleUpdateNotes(request, env), 200, cors);
+      }
+      if (url.pathname === "/add-manual") {
+        return json(await handleAddManual(request, env), 200, cors);
       }
       if (url.pathname === "/ingest") {
         // Same pipeline the cron trigger runs, exposed for on-demand testing.
@@ -139,6 +149,55 @@ async function handleUpdateNotes(request, env) {
   await commitArticlesFile(env, articles, sha, `Update notes: ${target.title}`);
 
   return { ok: true };
+}
+
+// A fully user-authored article (the app's "Write your own" form). Unlike
+// /add-article there's nothing to fetch or classify — we take the record as
+// given, normalize it to the schema, and commit it.
+async function handleAddManual(request, env) {
+  const body = await request.json();
+  const input = body.record || body;
+
+  const title = String(input.title || "").trim();
+  if (!title) throw new Error("Missing 'title'");
+  if (!TAXONOMY.primaryBuckets.includes(input.primaryBucket)) throw new Error("Invalid 'primaryBucket'");
+  if (input.sector && !TAXONOMY.sectors.includes(input.sector)) throw new Error("Invalid 'sector'");
+
+  const finalDate = input.dateAdded || new Date().toISOString().slice(0, 10);
+  const { articles, sha } = await getArticlesFile(env);
+
+  if (input.url) {
+    const existing = articles.find(a => normalizeUrl(a.url) === normalizeUrl(input.url));
+    if (existing) return { ok: true, duplicate: true, article: existing };
+  }
+
+  const record = {
+    id: uniqueId(finalDate, title, articles),
+    title,
+    url: input.url || "",
+    source: input.source || "",
+    slackChannel: input.slackChannel || "",
+    sender: input.sender || "",
+    sharedAt: input.sharedAt || finalDate,
+    whyShared: input.whyShared || "",
+    primaryBucket: input.primaryBucket,
+    sector: input.sector || null,
+    companyName: input.companyName || "",
+    tags: Array.isArray(input.tags) ? input.tags : [],
+    imageUrl: input.imageUrl || "",
+    summary: input.summary || "",
+    fullText: (input.fullText || "").slice(0, MAX_FULLTEXT_CHARS),
+    keyTakeaways: Array.isArray(input.keyTakeaways) ? input.keyTakeaways : [],
+    openQuestions: Array.isArray(input.openQuestions) ? input.openQuestions : [],
+    myNotes: input.myNotes || "",
+    relatedArticleIds: Array.isArray(input.relatedArticleIds) ? input.relatedArticleIds : [],
+    dateAdded: finalDate,
+  };
+
+  articles.push(record);
+  await commitArticlesFile(env, articles, sha, `Add manual article via live sync: ${record.title}`);
+
+  return { ok: true, article: record };
 }
 
 // ---------------- Scheduled feed ingestion ----------------

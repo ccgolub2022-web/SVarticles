@@ -72,6 +72,15 @@ You can also skip the "+" step entirely and just paste a Slack message
 (link + why it was shared + who/where + which section) straight to Claude in
 chat — same result, no live sync required.
 
+**Prefer to write one up yourself?** Click **✎ Write your own** next to "+ Add
+Article." That opens a form where *you* type the title, section, summary, key
+takeaways, tags, and notes — no link and no Claude required. It's handy for a
+piece with no URL, something paywalled, or a thought you just want to log. It
+saves the same way everything else does: with live sync on it goes straight to
+the repo; with live sync off it shows up right away tagged **"not yet synced"**
+and goes out with your next **Sync with Claude** (Claude appends it as-is —
+it won't rewrite what you wrote).
+
 Notes you type in any article's "My notes" box always save locally in your
 browser instantly; with live sync on they also auto-save to the repo a couple
 seconds after you stop typing (look for "Saved" under the notes label).

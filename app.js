@@ -13,6 +13,7 @@
 
 const NOTES_KEY = "sva_notes_overlay_v1";
 const PENDING_KEY = "sva_pending_queue_v2";
+const MANUAL_KEY = "sva_manual_queue_v1";
 const SIDEBAR_KEY = "sva_sidebar_collapsed_v1";
 const WORKER_URL_KEY = "sva_worker_url_v1";
 const WORKER_SECRET_KEY = "sva_worker_secret_v1";
@@ -314,6 +315,72 @@ function removePendingArticle(id) {
   renderMain();
 }
 
+// Manually-written articles that already have their content, waiting to be
+// committed. With live sync on they go straight to the repo; without it they
+// sit here (shown in the feed, flagged) until the next "Sync with Claude".
+function loadManualQueue() {
+  try { return JSON.parse(localStorage.getItem(MANUAL_KEY) || "[]"); }
+  catch { return []; }
+}
+function saveManualQueue(list) {
+  localStorage.setItem(MANUAL_KEY, JSON.stringify(list));
+  renderSyncIndicator();
+}
+function removeManualArticle(id) {
+  saveManualQueue(loadManualQueue().filter(a => a.id !== id));
+  renderSidebar();
+  renderMain();
+}
+function manualToArticle(rec, overlay) {
+  const notes = overlay[rec.id] !== undefined ? overlay[rec.id] : rec.myNotes;
+  return { ...rec, myNotes: notes, _pending: true, _manual: true };
+}
+
+function slugifyClient(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .slice(0, 60) || "article";
+}
+function uniqueArticleId(date, title) {
+  const base = `${date}-${slugifyClient(title)}`;
+  const ids = new Set([
+    ...ARTICLES.map(a => a.id),
+    ...loadManualQueue().map(a => a.id),
+    ...loadPendingQueue().map(p => p.id),
+  ]);
+  if (!ids.has(base)) return base;
+  let n = 2;
+  while (ids.has(`${base}-${n}`)) n++;
+  return `${base}-${n}`;
+}
+function buildManualRecord(f) {
+  const date = new Date().toISOString().slice(0, 10);
+  return {
+    id: uniqueArticleId(date, f.title),
+    title: f.title,
+    url: f.url || "",
+    source: f.source || "",
+    slackChannel: f.channel || "",
+    sender: f.sender || "",
+    sharedAt: date,
+    whyShared: "",
+    primaryBucket: f.bucket,
+    sector: f.sector || null,
+    companyName: f.companyName || "",
+    tags: Array.isArray(f.tags) ? f.tags : [],
+    imageUrl: "",
+    summary: f.summary || "",
+    fullText: "",
+    keyTakeaways: Array.isArray(f.keyTakeaways) ? f.keyTakeaways : [],
+    openQuestions: [],
+    myNotes: f.myNotes || "",
+    relatedArticleIds: [],
+    dateAdded: date,
+  };
+}
+
 function pendingToArticle(p, overlay) {
   return {
     id: p.id,
@@ -351,7 +418,12 @@ function mergedArticles() {
     .filter(a => !baseIds.has(a.id))
     .map(a => overlay[a.id] !== undefined ? { ...a, myNotes: overlay[a.id] } : a);
   const pending = loadPendingQueue().map(p => pendingToArticle(p, overlay));
-  return pending.concat(live).concat(base);
+  // Manually-written, not-yet-committed articles. Drop any whose id has since
+  // landed in articles.json so they don't linger as duplicates.
+  const manual = loadManualQueue()
+    .filter(rec => !baseIds.has(rec.id))
+    .map(rec => manualToArticle(rec, overlay));
+  return pending.concat(manual).concat(live).concat(base);
 }
 
 function isUnread(a) {
@@ -744,7 +816,7 @@ function renderCard(a) {
   left.className = "card-head-main";
   const badges = [`<span class="badge badge-bucket">${a.primaryBucket}</span>`];
   if (a.sector) badges.push(`<span class="badge badge-sector">${a.sector}</span>`);
-  if (a._pending) badges.push(`<span class="badge badge-pending">awaiting summary</span>`);
+  if (a._pending) badges.push(`<span class="badge badge-pending">${a._manual ? "not yet synced" : "awaiting summary"}</span>`);
   if (isUnread(a)) badges.push(`<span class="badge badge-unread">unread</span>`);
   left.innerHTML = `
     <div class="card-title-row">
@@ -828,15 +900,18 @@ function renderCard(a) {
   if (a._pending) {
     const note = document.createElement("div");
     note.className = "needs-review";
-    note.textContent = "Added by you — sync with Claude to get the summary, tags, and photo for this one.";
+    note.textContent = a._manual
+      ? "Written by you — not yet in the repo. Turn on live sync, or use “Sync with Claude,” to save it permanently."
+      : "Added by you — sync with Claude to get the summary, tags, and photo for this one.";
     body.appendChild(note);
 
     const removeBtn = document.createElement("button");
     removeBtn.className = "btn remove-pending-btn";
-    removeBtn.textContent = "Remove from queue";
+    removeBtn.textContent = a._manual ? "Discard" : "Remove from queue";
     removeBtn.onclick = (e) => {
       e.stopPropagation();
-      removePendingArticle(a.id);
+      if (a._manual) removeManualArticle(a.id);
+      else removePendingArticle(a.id);
     };
     body.appendChild(removeBtn);
   }
@@ -993,11 +1068,111 @@ async function submitAddModal() {
   setState({ view: "section", bucket, sector: null, tag: null, pendingOnly: false });
 }
 
+// ---------------- Write your own (manual entry) ----------------
+
+function updateManualModalSectorState() {
+  const bucket = document.getElementById("manualBucketInput").value;
+  const sectorSelect = document.getElementById("manualSectorInput");
+  const showSector = TAXONOMY.sectorBuckets.includes(bucket);
+  sectorSelect.disabled = !showSector;
+  sectorSelect.closest(".form-field").style.display = showSector ? "" : "none";
+  if (!showSector) sectorSelect.value = "";
+}
+
+function openManualModal() {
+  ["manualTitleInput", "manualBucketInput", "manualSectorInput", "manualCompanyInput",
+   "manualSourceInput", "manualUrlInput", "manualSenderInput", "manualSummaryInput",
+   "manualTakeawaysInput", "manualTagsInput", "manualNotesInput"].forEach(id => {
+    document.getElementById(id).value = "";
+  });
+  document.getElementById("manualDateDisplay").textContent = new Date().toISOString().slice(0, 10);
+  document.getElementById("manualFormError").style.display = "none";
+  document.getElementById("manualModalModeText").textContent = isLiveConfigured()
+    ? "it saves straight to the repo when you click Save."
+    : "it's saved locally and goes to the repo with your next “Sync with Claude.”";
+  updateManualModalSectorState();
+  setManualModalBusy(false);
+  document.getElementById("manualModal").classList.add("open");
+  setTimeout(() => document.getElementById("manualTitleInput").focus(), 50);
+}
+function closeManualModal() {
+  document.getElementById("manualModal").classList.remove("open");
+}
+function setManualModalBusy(busy, label) {
+  const btn = document.getElementById("submitManualModalBtn");
+  btn.disabled = busy;
+  btn.textContent = busy ? (label || "Saving…") : "Save article";
+  document.getElementById("closeManualModalBtn").disabled = busy;
+}
+
+function parseList(s, sep) {
+  return String(s || "").split(sep).map(x => x.trim()).filter(Boolean);
+}
+
+async function submitManualModal() {
+  const errorEl = document.getElementById("manualFormError");
+  errorEl.style.display = "none";
+  const title = document.getElementById("manualTitleInput").value.trim();
+  const bucket = document.getElementById("manualBucketInput").value;
+
+  if (!title) { errorEl.textContent = "Give it a title."; errorEl.style.display = "block"; document.getElementById("manualTitleInput").focus(); return; }
+  if (!bucket) { errorEl.textContent = "Choose which section this belongs in."; errorEl.style.display = "block"; document.getElementById("manualBucketInput").focus(); return; }
+
+  let url = document.getElementById("manualUrlInput").value.trim();
+  if (url && !/^https?:\/\//i.test(url)) url = "https://" + url;
+
+  const record = buildManualRecord({
+    title,
+    url,
+    source: document.getElementById("manualSourceInput").value.trim(),
+    bucket,
+    sector: document.getElementById("manualSectorInput").value,
+    companyName: document.getElementById("manualCompanyInput").value.trim(),
+    sender: document.getElementById("manualSenderInput").value.trim(),
+    tags: parseList(document.getElementById("manualTagsInput").value, ",")
+      .map(t => t.toLowerCase().replace(/\s+/g, "-")),
+    summary: document.getElementById("manualSummaryInput").value.trim(),
+    keyTakeaways: parseList(document.getElementById("manualTakeawaysInput").value, "\n"),
+    myNotes: document.getElementById("manualNotesInput").value.trim(),
+  });
+
+  if (isLiveConfigured()) {
+    setManualModalBusy(true, "Saving…");
+    try {
+      const data = await callWorker("/add-manual", { record });
+      addToLiveOverlay(data.article);
+      closeManualModal();
+      state.expanded.add(data.article.id);
+      setState({ view: "section", bucket, sector: null, tag: null, pendingOnly: false });
+      return;
+    } catch (err) {
+      // Live save failed — keep it locally so nothing is lost.
+      const list = loadManualQueue();
+      list.unshift(record);
+      saveManualQueue(list);
+      closeManualModal();
+      state.expanded.add(record.id);
+      setState({ view: "section", bucket, sector: null, tag: null, pendingOnly: false });
+      alert(`Live sync failed (${err.message}). Saved locally instead — use “Sync with Claude” to commit it.`);
+      return;
+    } finally {
+      setManualModalBusy(false);
+    }
+  }
+
+  const list = loadManualQueue();
+  list.unshift(record);
+  saveManualQueue(list);
+  closeManualModal();
+  state.expanded.add(record.id);
+  setState({ view: "section", bucket, sector: null, tag: null, pendingOnly: false });
+}
+
 // ---------------- Sync with Claude ----------------
 
 function renderSyncIndicator() {
   const notesCount = Object.values(loadNotesOverlay()).filter(v => v && v.trim().length).length;
-  const pendingCount = loadPendingQueue().length;
+  const pendingCount = loadPendingQueue().length + loadManualQueue().length;
   const btn = document.getElementById("syncBtn");
   const dirty = notesCount + pendingCount > 0;
   btn.innerHTML = dirty ? `Sync with Claude<span class="dirty-dot"></span>` : `Sync with Claude`;
@@ -1006,9 +1181,10 @@ function renderSyncIndicator() {
 function openSyncModal() {
   const overlay = loadNotesOverlay();
   const pending = loadPendingQueue();
-  const pendingIds = new Set(pending.map(p => p.id));
+  const manual = loadManualQueue();
+  const localIds = new Set([...pending.map(p => p.id), ...manual.map(m => m.id)]);
 
-  const noteEntries = Object.entries(overlay).filter(([id, v]) => v && v.trim().length && !pendingIds.has(id));
+  const noteEntries = Object.entries(overlay).filter(([id, v]) => v && v.trim().length && !localIds.has(id));
 
   const parts = [];
   if (pending.length) {
@@ -1018,24 +1194,32 @@ function openSyncModal() {
     });
     parts.push(`// New links — fetch each URL, classify per CLAUDE.md, and add full records to data/articles.json\n// (bucket/sector are already chosen — keep them as-is)\nconst NEW_LINKS = [\n${lines.join("\n")}\n];`);
   }
+  if (manual.length) {
+    const lines = manual.map(rec => {
+      const withNote = overlay[rec.id] !== undefined ? { ...rec, myNotes: overlay[rec.id] } : rec;
+      return "  " + JSON.stringify(withNote) + ",";
+    });
+    parts.push(`// Manually-written articles — append each of these full records to data/articles.json as-is\n// (they already have title/summary/tags — don't refetch or reclassify)\nconst MANUAL_ARTICLES = [\n${lines.join("\n")}\n];`);
+  }
   if (noteEntries.length) {
     const lines = noteEntries.map(([id, notes]) => `  { id: ${JSON.stringify(id)}, myNotes: ${JSON.stringify(notes)} },`);
     parts.push(`// Note updates — merge into existing articles' myNotes by id\nconst NOTES_UPDATES = [\n${lines.join("\n")}\n];`);
   }
   const snippet = parts.length
     ? parts.join("\n\n")
-    : "// Nothing to sync yet. Add a link with “+ Add Article” or write a note, then sync.";
+    : "// Nothing to sync yet. Add a link with “+ Add Article,” write your own, or add a note, then sync.";
 
   document.getElementById("syncTextarea").value = snippet;
-  document.getElementById("clearPendingBtn").style.display = pending.length ? "inline-block" : "none";
+  document.getElementById("clearPendingBtn").style.display = (pending.length || manual.length) ? "inline-block" : "none";
   document.getElementById("syncModal").classList.add("open");
 }
 function closeSyncModal() {
   document.getElementById("syncModal").classList.remove("open");
 }
 function clearPendingQueue() {
-  if (!confirm("Clear the pending queue? Only do this after Claude has added these links to data/articles.json.")) return;
+  if (!confirm("Clear the pending queue? Only do this after Claude has added these links (and manual articles) to data/articles.json.")) return;
   savePendingQueue([]);
+  saveManualQueue([]);
   renderSidebar();
   renderMain();
   closeSyncModal();
@@ -1128,6 +1312,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("submitAddModalBtn").addEventListener("click", submitAddModal);
   document.getElementById("addUrlInput").addEventListener("keydown", (e) => { if (e.key === "Enter") submitAddModal(); });
   document.getElementById("addBucketInput").addEventListener("change", updateAddModalSectorState);
+
+  document.getElementById("writeArticleBtn").addEventListener("click", openManualModal);
+  document.getElementById("closeManualModalBtn").addEventListener("click", closeManualModal);
+  document.getElementById("submitManualModalBtn").addEventListener("click", submitManualModal);
+  document.getElementById("manualBucketInput").addEventListener("change", updateManualModalSectorState);
 
   document.getElementById("syncBtn").addEventListener("click", openSyncModal);
   document.getElementById("closeSyncModalBtn").addEventListener("click", closeSyncModal);

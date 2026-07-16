@@ -78,6 +78,14 @@ For each `NEW_LINKS` entry:
    then append the full record to the array in `data/articles.json` (valid
    JSON only — no comments, no trailing commas).
 
+A sync payload may also contain a `MANUAL_ARTICLES` array — full records the
+user wrote themselves via the **Write your own** form (title, summary,
+takeaways, tags, notes all already filled in). For each of these, **append the
+record to `data/articles.json` as-is** — don't refetch a URL, reclassify, or
+rewrite the summary. Just sanity-check the JSON and, if the `id` collides with
+an existing one, give it a unique suffix. These have no `og:image`, so leave
+`imageUrl` as whatever's given (usually `""`).
+
 For each `NOTES_UPDATES` entry, find the existing article by `id` in
 `data/articles.json` and overwrite its `myNotes` field.
 
